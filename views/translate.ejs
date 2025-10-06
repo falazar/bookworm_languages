@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <nav class="nav">
+            <a href="/">← Back to Books</a>
+            <a href="/hello">Hello</a>
+        </nav>
+        
+        <div class="welcome">
+            <h1><%= title %></h1>
+            <p>Configure translation settings for: <strong><%= displayName %></strong></p>
+        </div>
+        
+        <!-- Translation Form -->
+        <div class="translate-section">
+            <form id="translateForm">
+                <div class="form-group">
+                    <label for="sourceLanguage">Source Language:</label>
+                    <select id="sourceLanguage" name="sourceLanguage" required>
+                        <option value="auto">Auto-detect</option>
+                        <% languages.forEach(function(lang) { %>
+                            <option value="<%= lang.code %>"><%= lang.name %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="targetLanguage">Target Language:</label>
+                    <select id="targetLanguage" name="targetLanguage" required>
+                        <% languages.forEach(function(lang) { %>
+                            <option value="<%= lang.code %>"><%= lang.name %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="translationQuality">Translation Quality:</label>
+                    <select id="translationQuality" name="translationQuality">
+                        <option value="fast">Fast (Basic)</option>
+                        <option value="balanced" selected>Balanced (Recommended)</option>
+                        <option value="premium">Premium (High Quality)</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="preserveFormatting" name="preserveFormatting" checked>
+                        Preserve formatting and images
+                    </label>
+                </div>
+                
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="preserveMetadata" name="preserveMetadata" checked>
+                        Preserve book metadata (title, author, etc.)
+                    </label>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="button" class="btn-secondary" onclick="window.location.href='/'">Cancel</button>
+                    <button type="submit" class="btn-primary">Start Translation</button>
+                </div>
+            </form>
+        </div>
+        
+        <!-- Translation Status -->
+        <div id="translationStatus" class="translation-status" style="display: none;">
+            <h3>Translation Progress</h3>
+            <div class="progress-bar">
+                <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <p id="statusText">Preparing translation...</p>
+        </div>
+        
+        <!-- Download Section -->
+        <div id="downloadSection" class="download-section" style="display: none;">
+            <h3>Translation Complete! 🎉</h3>
+            <p>Your translated text is ready for review.</p>
+            
+            <div class="translation-result">
+                <div class="text-comparison">
+                    <div class="original-text">
+                        <h4>Original Text:</h4>
+                        <p id="originalTextDisplay"></p>
+                    </div>
+                    <div class="translated-text">
+                        <h4>Translated Text:</h4>
+                        <p id="translatedTextDisplay"></p>
+                    </div>
+                </div>
+            </div>
+            
+            <button id="downloadBtn" class="btn-download">Download Translated Text</button>
+        </div>
+    </div>
+    
+    <script>
+        // Store filename for later use
+        const filename = '<%= filename %>';
+        
+        // Initialize language preferences from localStorage
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set default source language to English (en) or last used
+            const lastSourceLang = localStorage.getItem('lastSourceLanguage') || 'en';
+            const sourceSelect = document.getElementById('sourceLanguage');
+            sourceSelect.value = lastSourceLang;
+            
+            // Set default target language to last used or Spanish as fallback
+            const lastTargetLang = localStorage.getItem('lastTargetLanguage') || 'es';
+            const targetSelect = document.getElementById('targetLanguage');
+            targetSelect.value = lastTargetLang;
+            
+            // Save language preferences when changed
+            sourceSelect.addEventListener('change', function() {
+                localStorage.setItem('lastSourceLanguage', this.value);
+            });
+            
+            targetSelect.addEventListener('change', function() {
+                localStorage.setItem('lastTargetLanguage', this.value);
+            });
+        });
+        
+        // Handle translation form submission
+        document.getElementById('translateForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const sourceLanguage = formData.get('sourceLanguage');
+            const targetLanguage = formData.get('targetLanguage');
+            
+            // Show translation status
+            document.getElementById('translationStatus').style.display = 'block';
+            document.getElementById('translateForm').style.display = 'none';
+            
+            // Perform actual translation
+            await performTranslation(sourceLanguage, targetLanguage);
+        });
+        
+        // Perform actual translation
+        async function performTranslation(sourceLanguage, targetLanguage) {
+            const progressFill = document.getElementById('progressFill');
+            const statusText = document.getElementById('statusText');
+            
+            try {
+                // Sample text for testing (in production, this would be extracted from EPUB)
+                const sampleText = "He dumped the can's contents onto the concrete island between the gas pumps, flipped aside some candy bar wrappers, and plucked out a phone in a dusty folded leather case. Something an older man would carry.";
+                
+                // Update progress
+                progressFill.style.width = '20%';
+                statusText.textContent = 'Preparing translation...';
+                
+                // Make translation request
+                const response = await fetch('/translate-text', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        text: sampleText,
+                        sourceLanguage: sourceLanguage,
+                        targetLanguage: targetLanguage
+                    })
+                });
+                
+                progressFill.style.width = '60%';
+                statusText.textContent = 'Translating content...';
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    progressFill.style.width = '100%';
+                    statusText.textContent = 'Translation complete!';
+                    
+                    // Store translated text for download
+                    window.translatedText = result.translatedText;
+                    window.originalText = sampleText;
+                    
+                    setTimeout(() => {
+                        showDownloadSection();
+                    }, 1000);
+                } else {
+                    throw new Error(result.error || 'Translation failed');
+                }
+                
+            } catch (error) {
+                console.error('Translation error:', error);
+                statusText.textContent = 'Translation failed: ' + error.message;
+                progressFill.style.background = '#dc3545';
+                
+                // Show error and allow retry
+                setTimeout(() => {
+                    document.getElementById('translationStatus').style.display = 'none';
+                    document.getElementById('translateForm').style.display = 'block';
+                }, 3000);
+            }
+        }
+        
+        // Show download section
+        function showDownloadSection() {
+            document.getElementById('translationStatus').style.display = 'none';
+            document.getElementById('downloadSection').style.display = 'block';
+            
+            // Display the translation results
+            document.getElementById('originalTextDisplay').textContent = window.originalText;
+            document.getElementById('translatedTextDisplay').textContent = window.translatedText;
+        }
+        
+        // Handle download
+        document.getElementById('downloadBtn').addEventListener('click', function() {
+            // Create a simple text file with the translation
+            const content = `Original Text:\n${window.originalText}\n\nTranslated Text:\n${window.translatedText}`;
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'translation-result.txt';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+</html>

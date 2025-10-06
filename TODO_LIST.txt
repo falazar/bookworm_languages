@@ -22,12 +22,30 @@ CURRENT FEATURES:
 - Uploads directory for file handling
 - External CSS file for better organization
 
-FUTURE ENHANCES:
+PHASE 1: CORE FUNCTIONALITY (MVP)
+- [ ] EPUB file upload interface
+- [ ] Language selection dropdown
+- [ ] Basic EPUB parsing
+- [ ] Translation API integration
+- [ ] EPUB reconstruction
+- [ ] Download functionality
+
+PHASE 2: ENHANCED FEATURES
+- [ ] Progress tracking for large files
+- [ ] Translation quality options
+- [ ] Batch processing
+- [ ] User accounts and history
+- [ ] Preview translated content
+
+PHASE 3: ADVANCED FEATURES
+- [ ] Custom translation models
+- [ ] Format preservation (images, formatting)
+- [ ] Multiple output formats
+- [ ] API endpoints for external use
+
+ADDITIONAL ENHANCES:
 - [ ] Add database integration (MongoDB/PostgreSQL)
 - [ ] Implement user authentication
-- [ ] Add file upload functionality
-- [ ] Create API endpoints
-- [ ] Add more EJS templates
 - [ ] Implement error handling middleware
 - [ ] Add logging system
 - [ ] Create unit tests
@@ -56,3 +74,7 @@ PROJECT STRUCTURE:
 ├── vitest.config.ts      # Vitest configuration
 ├── .gitignore           # Git ignore rules
 └── TODO_LIST.txt        # This file
+
+
+url for translate
+https://translate.google.com/?sl=auto&tl=fr&text=He%20dumped%20the%20can%E2%80%99s%20contents%20onto%20the%20concrete%20island%20between%20the%20gas%20pumps%2C%20flipped%20aside%20some%20candy%20bar%20wrappers%2C%20and%20plucked%20out%20a%20phone%20in%20a%20dusty%20folded%20leather%20case.%20Something%20an%20older%20man%20would%20carry.&op=translate

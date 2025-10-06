@@ -18,18 +18,85 @@
             <p><%= message %></p>
         </div>
         
-        <div class="feature-list">
-            <h2>🚀 Your Node.js TypeScript Project is Ready!</h2>
-            <p>This project includes:</p>
-            <ul>
-                <li>✅ Express.js server</li>
-                <li>✅ TypeScript support</li>
-                <li>✅ EJS templating</li>
-                <li>✅ Vitest for testing</li>
-                <li>✅ Development watching with nodemon</li>
-                <li>✅ Git repository initialized</li>
-            </ul>
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <h2>📁 Upload New Book</h2>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <div class="upload-container">
+                    <input type="file" id="epubFile" name="epubFile" accept=".epub" required>
+                    <button type="submit" class="upload-btn">Upload EPUB</button>
+                </div>
+                <div id="uploadStatus" class="upload-status"></div>
+            </form>
+        </div>
+        
+        <!-- Books List Section -->
+        <div class="books-section">
+            <h2>📚 Your Books</h2>
+            <% if (books && books.length > 0) { %>
+                <div class="books-grid">
+                    <% books.forEach(function(book) { %>
+                        <div class="book-card" onclick="window.location.href='/translate/<%= book.filename %>'">
+                            <div class="book-icon">📖</div>
+                            <div class="book-info">
+                                <h3 class="book-title"><%= book.displayName %></h3>
+                                <p class="book-meta">
+                                    Size: <%= book.sizeFormatted %><br>
+                                    Uploaded: <%= book.uploadDate.toLocaleDateString() %>
+                                </p>
+                            </div>
+                            <div class="book-action">
+                                <span class="translate-btn">Translate →</span>
+                            </div>
+                        </div>
+                    <% }); %>
+                </div>
+            <% } else { %>
+                <div class="no-books">
+                    <p>No books uploaded yet. Upload your first EPUB file above!</p>
+                </div>
+            <% } %>
         </div>
     </div>
+    
+    <script>
+        // Handle file upload
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const fileInput = document.getElementById('epubFile');
+            const statusDiv = document.getElementById('uploadStatus');
+            
+            if (!fileInput.files[0]) {
+                statusDiv.innerHTML = '<p class="error">Please select a file first.</p>';
+                return;
+            }
+            
+            formData.append('epubFile', fileInput.files[0]);
+            
+            try {
+                statusDiv.innerHTML = '<p class="loading">Uploading...</p>';
+                
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    statusDiv.innerHTML = '<p class="success">File uploaded successfully! Refreshing page...</p>';
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 1500);
+                } else {
+                    statusDiv.innerHTML = '<p class="error">Upload failed: ' + result.error + '</p>';
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<p class="error">Upload failed: ' + error.message + '</p>';
+            }
+        });
+    </script>
 </body>
 </html>

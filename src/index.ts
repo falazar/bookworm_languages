@@ -131,16 +131,16 @@ app.get('/translate/:filename', (req, res) => {
   });
 });
 
-app.post('/translate-text', async (req, res) => {
+app.post('/translate-book', async (req, res) => {
   try {
-    const { text, sourceLanguage, targetLanguage } = req.body;
+    const { filename, sourceLanguage, targetLanguage } = req.body;
     
-    if (!text || !targetLanguage) {
-      return res.status(400).json({ error: 'Text and target language are required' });
+    if (!filename || !targetLanguage) {
+      return res.status(400).json({ error: 'Filename and target language are required' });
     }
     
-    const translatedText = await translationService.translateText(
-      text, 
+    const translatedText = await translationService.translateBook(
+      filename, 
       targetLanguage, 
       sourceLanguage === 'auto' ? 'auto' : sourceLanguage
     );
@@ -149,7 +149,6 @@ app.post('/translate-text', async (req, res) => {
       success: true, 
       translatedText: translatedText 
     });
-    
   } catch (error) {
     console.error('Translation error:', error);
     res.status(500).json({ 

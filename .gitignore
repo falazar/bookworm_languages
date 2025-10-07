@@ -4,3 +4,7 @@ dist/
 .env
 .DS_Store
 Thumbs.db
+uploads/
+temp_translated*.html
+tmp/
+old_epub/

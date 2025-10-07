@@ -157,13 +157,13 @@
                 statusText.textContent = 'Preparing translation...';
                 
                 // Make translation request
-                const response = await fetch('/translate-text', {
+                const response = await fetch('/translate-book', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        text: sampleText,
+                        filename: filename,
                         sourceLanguage: sourceLanguage,
                         targetLanguage: targetLanguage
                     })

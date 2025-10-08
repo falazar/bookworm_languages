@@ -2,11 +2,15 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
-import { TranslationService } from './translation-service';
+import { fileURLToPath } from 'url';
+import { TranslationService } from './translation-service.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3888;
-const UPLOADS_DIR = path.join(__dirname, '../uploads');
+const UPLOADS_DIR = path.join(__dirname, '../data/uploads');
 const translationService = new TranslationService();
 
 // Set EJS as the view engine

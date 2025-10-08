@@ -1,8 +1,12 @@
 import puppeteer from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export class TranslationService {
   private baseUrl = 'https://translate.google.com';
@@ -27,13 +31,13 @@ export class TranslationService {
 
     try {
       // Clean up temp directory
-      fs.rmSync(path.join(__dirname, '../tmp'), { recursive: true, force: true });
-      fs.rmSync(path.join(__dirname, '../old_epub'), { recursive: true, force: true });
-      fs.mkdirSync(path.join(__dirname, '../tmp'));
-      fs.mkdirSync(path.join(__dirname, '../old_epub'));
+    fs.rmSync(path.join(__dirname, '../data/tmp'), { recursive: true, force: true });
+    fs.rmSync(path.join(__dirname, '../data/old_epub'), { recursive: true, force: true });
+    fs.mkdirSync(path.join(__dirname, '../data/tmp'));
+    fs.mkdirSync(path.join(__dirname, '../data/old_epub'));
 
       // Open and read the EPUB file
-      const filePath = path.join(__dirname, '../uploads', filename);
+      const filePath = path.join(__dirname, '../data/uploads', filename);
       console.log('Opening EPUB file:', filePath);
 
       // Extract EPUB first, then process files manually
@@ -373,10 +377,10 @@ export class TranslationService {
     sourceLang: string = 'auto'
   ): Promise<string> {
     try {
-      const originalPath = path.join(__dirname, '../uploads', originalFilename);
+      const originalPath = path.join(__dirname, '../data/uploads', originalFilename);
       const baseName = path.parse(originalFilename).name;
       const outputFilename = `${baseName}_${targetLang}.epub`;
-      const outputPath = path.join(__dirname, '../uploads', outputFilename);
+      const outputPath = path.join(__dirname, '../data/uploads', outputFilename);
 
       // STEP 1: Setup dirs.
       // Remove old EPUB if exists
@@ -384,7 +388,7 @@ export class TranslationService {
         fs.unlinkSync(outputPath);
       }
       // Create temp directory for extraction
-      const oldEpubDir = path.join(__dirname, '../old_epub');
+      const oldEpubDir = path.join(__dirname, '../data/old_epub');
       if (fs.existsSync(oldEpubDir)) {
         fs.rmSync(oldEpubDir, { recursive: true, force: true });
       }
@@ -393,7 +397,7 @@ export class TranslationService {
       // STEP 2: Extract using PowerShell (now that it's a .zip file)
       console.log(`\n\nSTEP 2: Extracting EPUB... ${new Date().toISOString()}`);
       // Copy EPUB to temp location and rename to .zip for PowerShell
-      const tempZipPath = path.join(__dirname, '../tmp', 'temp.zip');
+      const tempZipPath = path.join(__dirname, '../data/tmp', 'temp.zip');
       fs.copyFileSync(originalPath, tempZipPath);
       await this.execAsync(
         `powershell -Command "Expand-Archive -Path '${tempZipPath}' -DestinationPath '${oldEpubDir}' -Force"`

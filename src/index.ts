@@ -131,19 +131,20 @@ app.get('/translate/:filename', (req, res) => {
   });
 });
 
-app.post('/translate-book', async (req, res) => {
-  try {
-    const { filename, sourceLanguage, targetLanguage } = req.body;
-    
-    if (!filename || !targetLanguage) {
-      return res.status(400).json({ error: 'Filename and target language are required' });
-    }
-    
-    const translatedText = await translationService.translateBook(
-      filename, 
-      targetLanguage, 
-      sourceLanguage === 'auto' ? 'auto' : sourceLanguage
-    );
+    app.post('/translate-book', async (req, res) => {
+      try {
+        const { filename, sourceLanguage, targetLanguage, startFile } = req.body;
+        
+        if (!filename || !targetLanguage) {
+          return res.status(400).json({ error: 'Filename and target language are required' });
+        }
+        
+        const translatedText = await translationService.translateBook(
+          filename, 
+          targetLanguage, 
+          sourceLanguage === 'auto' ? 'auto' : sourceLanguage,
+          startFile
+        );
     
     res.json({ 
       success: true, 

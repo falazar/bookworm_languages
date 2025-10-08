@@ -21,23 +21,25 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     // Keep original filename
     cb(null, file.originalname);
-  }
+  },
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     // Accept only EPUB files
-    if (file.mimetype === 'application/epub+zip' || 
-        path.extname(file.originalname).toLowerCase() === '.epub') {
+    if (
+      file.mimetype === 'application/epub+zip' ||
+      path.extname(file.originalname).toLowerCase() === '.epub'
+    ) {
       cb(null, true);
     } else {
       cb(new Error('Only EPUB files are allowed!'));
     }
   },
   limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB limit
-  }
+    fileSize: 50 * 1024 * 1024, // 50MB limit
+  },
 });
 
 // Middleware
@@ -59,7 +61,7 @@ function getBookList() {
           displayName: file, // No timestamp to remove
           size: stats.size,
           uploadDate: stats.mtime,
-          sizeFormatted: formatFileSize(stats.size)
+          sizeFormatted: formatFileSize(stats.size),
         };
       })
       .sort((a, b) => b.uploadDate.getTime() - a.uploadDate.getTime());
@@ -81,10 +83,10 @@ function formatFileSize(bytes: number): string {
 // Routes
 app.get('/', (req, res) => {
   const books = getBookList();
-  res.render('index', { 
+  res.render('index', {
     title: 'Book Language Translator',
     message: 'Upload and translate your EPUB books',
-    books: books
+    books: books,
   });
 });
 
@@ -92,23 +94,23 @@ app.post('/upload', upload.single('epubFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
-  
-  res.json({ 
-    success: true, 
+
+  res.json({
+    success: true,
     message: 'File uploaded successfully',
-    filename: req.file.filename
+    filename: req.file.filename,
   });
 });
 
 app.get('/translate/:filename', (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(UPLOADS_DIR, filename);
-  
+
   // Check if file exists
   if (!fs.existsSync(filePath)) {
     return res.status(404).send('File not found');
   }
-  
+
   // Supported languages
   const languages = [
     { code: 'en', name: 'English' },
@@ -120,41 +122,40 @@ app.get('/translate/:filename', (req, res) => {
     { code: 'ru', name: 'Russian' },
     { code: 'ja', name: 'Japanese' },
     { code: 'ko', name: 'Korean' },
-    { code: 'zh', name: 'Chinese' }
+    { code: 'zh', name: 'Chinese' },
   ];
-  
+
   res.render('translate', {
     title: 'Translate Book',
     filename: filename,
     displayName: filename, // No timestamp to remove
-    languages: languages
+    languages: languages,
   });
 });
 
-    app.post('/translate-book', async (req, res) => {
-      try {
-        const { filename, sourceLanguage, targetLanguage, startFile } = req.body;
-        
-        if (!filename || !targetLanguage) {
-          return res.status(400).json({ error: 'Filename and target language are required' });
-        }
-        
-        const translatedText = await translationService.translateBook(
-          filename, 
-          targetLanguage, 
-          sourceLanguage === 'auto' ? 'auto' : sourceLanguage,
-          startFile
-        );
-    
-    res.json({ 
-      success: true, 
-      translatedText: translatedText 
+app.post('/translate-book', async (req, res) => {
+  try {
+    const { filename, sourceLanguage, targetLanguage } = req.body;
+
+    if (!filename || !targetLanguage) {
+      return res.status(400).json({ error: 'Filename and target language are required' });
+    }
+
+    const translatedText = await translationService.translateBook(
+      filename,
+      targetLanguage,
+      sourceLanguage === 'auto' ? 'auto' : sourceLanguage
+    );
+
+    res.json({
+      success: true,
+      translatedText: translatedText,
     });
   } catch (error) {
     console.error('Translation error:', error);
-    res.status(500).json({ 
-      error: 'Translation failed', 
-      message: error instanceof Error ? error.message : 'Unknown error occurred'
+    res.status(500).json({
+      error: 'Translation failed',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
     });
   }
 });
@@ -162,7 +163,7 @@ app.get('/translate/:filename', (req, res) => {
 app.get('/hello', (req, res) => {
   res.render('hello', {
     title: 'Hello Page',
-    name: req.query.name || 'World'
+    name: req.query.name || 'World',
   });
 });
 

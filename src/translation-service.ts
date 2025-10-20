@@ -440,6 +440,13 @@ export class TranslationService {
           `"C:\\Program Files\\7-Zip\\7z.exe" a -tzip "${outputPath}" "${oldEpubDir}\\*" -mx=0`
         );
         console.log('Created EPUB using 7zip');
+        /* to manually do this two steps: 
+        # First add mimetype uncompressed
+        & "C:\Program Files\7-Zip\7z.exe" a -tzip "test.epub" "C:\Users\robin\Downloads\Im_Starting_to_Worry_About_Thi_-_Jason_Pargin_fr2.epub\mimetype" -mx=0
+
+        # Then add everything else
+        & "C:\Program Files\7-Zip\7z.exe" a -tzip "test.epub" "C:\Users\robin\Downloads\Im_Starting_to_Worry_About_Thi_-_Jason_Pargin_fr2.epub\*" -mx=9
+        */
       } catch (error) {
         console.error('7zip failed to create EPUB:', error);
         throw new Error(

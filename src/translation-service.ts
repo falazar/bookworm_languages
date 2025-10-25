@@ -1,8 +1,8 @@
-import puppeteer from 'puppeteer';
+import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import puppeteer from 'puppeteer';
 import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
 import { promisify } from 'util';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -28,20 +28,42 @@ export class TranslationService {
   ): Promise<string> {
     const startTime = new Date();
     console.log(`\n🚀 TRANSLATION STARTED: ${startTime.toISOString()}`);
+    console.log(`📁 Filename: ${filename}`);
+    console.log(`🌍 Target Language: ${targetLang}`);
+    console.log(`🌍 Source Language: ${sourceLang}`);
 
     try {
-      // Clean up temp directory
-    fs.rmSync(path.join(__dirname, '../data/tmp'), { recursive: true, force: true });
-    fs.rmSync(path.join(__dirname, '../data/old_epub'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(__dirname, '../data/tmp'));
-    fs.mkdirSync(path.join(__dirname, '../data/old_epub'));
+      // Clean up temp directory with proper error handling
+      const tmpDir = path.join(__dirname, '../data/tmp');
+      const oldEpubDir = path.join(__dirname, '../data/old_epub');
+
+      // Remove directories if they exist
+      if (fs.existsSync(tmpDir)) {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+      if (fs.existsSync(oldEpubDir)) {
+        fs.rmSync(oldEpubDir, { recursive: true, force: true });
+      }
+
+      // Create directories
+      fs.mkdirSync(tmpDir, { recursive: true });
+      fs.mkdirSync(oldEpubDir, { recursive: true });
 
       // Open and read the EPUB file
       const filePath = path.join(__dirname, '../data/uploads', filename);
-      console.log('Opening EPUB file:', filePath);
+      console.log('📖 Opening EPUB file:', filePath);
+
+      // Check if file exists
+      if (!fs.existsSync(filePath)) {
+        console.error('❌ EPUB file not found:', filePath);
+        throw new Error(`EPUB file not found: ${filePath}`);
+      }
+      console.log('✅ EPUB file exists and is accessible');
 
       // Extract EPUB first, then process files manually
+      console.log('🔄 Starting EPUB repackaging...');
       const newEPUBPath = await this.repackageEPUB(filename, targetLang, sourceLang);
+      console.log('✅ EPUB repackaging completed');
 
       const endTime = new Date();
       const duration = (endTime.getTime() - startTime.getTime()) / 1000 / 60; // minutes
@@ -112,15 +134,17 @@ export class TranslationService {
         );
         const translatedChunk = await this.translateChunk(chunk, targetLang, sourceLang);
         translatedContent += translatedChunk;
+
         const chars = chunk.length;
         console.log(
           `\nProcessed chunk ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters`
         );
         // console.log(`DEBUG: Translated chunk:`, translatedChunk);
-      }
+      } // while i
 
       // Write translated content back to the same file
       fs.writeFileSync(filePath, translatedContent);
+      console.log(`DEBUG: Translated and updated: ${filePath}`);
       console.log(`Translated and updated: ${path.basename(filePath)}`);
     } catch (error) {
       console.error(`Error translating file ${filePath}:`, error);
@@ -150,13 +174,12 @@ export class TranslationService {
     let result = '';
 
     // show length of both original and translated lines
-    // console.log('\nDEBUG: ORIGINAL LINES:', originalLines.length);
-    // console.log('\nDEBUG: TRANSLATED LINES:', translatedLines.length);
+    console.log('\nDEBUG: ORIGINAL LINES:', originalLines.length);
+    console.log('\nDEBUG: TRANSLATED LINES:', translatedLines.length);
 
     // Track counters separately for original and translated lines
     let originalIndex = 0;
     let translatedIndex = 0;
-
     while (
       originalIndex < 1000 &&
       (originalIndex < originalLines.length || translatedIndex < translatedLines.length)
@@ -218,9 +241,11 @@ export class TranslationService {
     targetLang: string,
     sourceLang: string = 'auto'
   ): Promise<string> {
+    const debugLogs = true;
+
     // Debug mode - return placeholder text
     if (this.debugMode) {
-      // console.log('DEBUG MODE: Returning placeholder translation');
+      console.log('DEBUG MODE: Returning placeholder translation');
       return 'FAKE TRANSLATED TEXT';
     }
 
@@ -242,12 +267,26 @@ export class TranslationService {
       // do smart single quote:
       text = text.replace('’', "'");
 
+      // Check for an over limit size maybe here?
+      if (text.length > 1000) {
+        console.log('DEBUG: Text length:', text.length);
+        console.log('ERROR: Text is too long to translate, debug test shortening.');
+        // chop it for testing...
+        text = text.substring(0, 1000);
+        // console.log('Chopped text to:', text);
+      }
+
       const encodedText = encodeURIComponent(text);
-      //   console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
+      if (debugLogs) {
+        console.log('\nDEBUG: BEFORE ENCODING TEXT:', text);
+        // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
+      }
 
       // Build the translation URL
       const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
-      // console.log(" DEBUG url", url);
+      if (debugLogs) {
+        // console.log('\nDEBUG url', url);
+      }
 
       // Launch Puppeteer browser
       browser = await puppeteer.launch({
@@ -271,7 +310,7 @@ export class TranslationService {
       await page.setViewport({ width: 1366, height: 768 });
 
       // Navigate to Google Translate
-      //   console.log('Loading Google Translate page...');
+      console.log('\nLoading Google Translate page...');
       await page.goto(url, {
         waitUntil: 'networkidle2',
         timeout: 10000,
@@ -283,7 +322,8 @@ export class TranslationService {
       // Wait for translation to appear
       //   console.log('Waiting for translation to load...');
       // Delay here for page load and also not to hit translation server too fast!
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Was 3 second lowered to 1.
+      // await new Promise(resolve => setTimeout(resolve, 3000)); // Was 3 second lowered to 1.
+      await new Promise(resolve => setTimeout(resolve, 6000)); // Was 3 second lowered to 1.
       // 1 seemed to work ok. not working now
       // 2 was working ok for alot, back up to 3 to test larger.
       // 400 was too fast or the ones before it were, hmmm
@@ -293,7 +333,7 @@ export class TranslationService {
       const pageContent = await page.content();
       const tempFilePath = path.join(__dirname, '../temp_translated_full.html');
       fs.writeFileSync(tempFilePath, pageContent);
-      // console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
+      console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
 
       if (!translation) {
         throw new Error(
@@ -325,11 +365,11 @@ export class TranslationService {
         .replace(/id = /g, 'id=')
         .replace(/role = /g, 'role=');
 
-      // console.log('\nDEBUG: AFTER HTML ENCODING:', decodedTranslation);
+      console.log('\nDEBUG: AFTER HTML DECODING:', decodedTranslation);
 
       return decodedTranslation;
     } catch (error) {
-      console.error('Translation error:', error);
+      console.error('\nTranslation error:', error);
       throw new Error(
         `Translation failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
       );
@@ -340,7 +380,7 @@ export class TranslationService {
     }
   }
 
-  // Extract translation from HTML content from googles page.
+  // Extract translation from HTML content from googles page after page loads.
   private extractTranslationFromHTML(): string | null {
     // First try to extract from data-text attribute using regex
     const htmlContent = document.documentElement.outerHTML;
@@ -349,13 +389,20 @@ export class TranslationService {
     const dataTextMatches = htmlContent.match(
       /data-language-name="([^"]+)"[^>]*data-text="([^"]*(?:\\.[^"]*)*)"/g
     );
+    if (!dataTextMatches) {
+      console.log('No dataTextMatches found from google page after page loads.');
+    } else {
+      console.log('dataTextMatches found from google page after page loads.');
+    }
 
+    // Loop and find out language match now.
     if (dataTextMatches) {
       for (const match of dataTextMatches) {
         const languageMatch = match.match(/data-language-name="([^"]+)"/);
         const textMatch = match.match(/data-text="([^"]*(?:\\.[^"]*)*)"/);
 
         if (languageMatch && textMatch && languageMatch[1] !== 'English') {
+          console.log('DEBUG: Found text match:', textMatch[1]);
           return textMatch[1];
         }
       }
@@ -376,6 +423,8 @@ export class TranslationService {
     targetLang: string,
     sourceLang: string = 'auto'
   ): Promise<string> {
+    console.log(`📁 Original filename: ${originalFilename}`);
+
     try {
       const originalPath = path.join(__dirname, '../data/uploads', originalFilename);
       const baseName = path.parse(originalFilename).name;
@@ -383,6 +432,7 @@ export class TranslationService {
       const outputPath = path.join(__dirname, '../data/uploads', outputFilename);
 
       // STEP 1: Setup dirs.
+      console.log('\n📝 STEP 1: Setting up directories...');
       // Remove old EPUB if exists
       if (fs.existsSync(outputPath)) {
         fs.unlinkSync(outputPath);
@@ -392,27 +442,75 @@ export class TranslationService {
       if (fs.existsSync(oldEpubDir)) {
         fs.rmSync(oldEpubDir, { recursive: true, force: true });
       }
-      fs.mkdirSync(oldEpubDir);
+      fs.mkdirSync(oldEpubDir, { recursive: true });
 
       // STEP 2: Extract using PowerShell (now that it's a .zip file)
-      console.log(`\n\nSTEP 2: Extracting EPUB... ${new Date().toISOString()}`);
+      console.log(`\n📦 STEP 2: Extracting EPUB... ${new Date().toISOString()}`);
       // Copy EPUB to temp location and rename to .zip for PowerShell
       const tempZipPath = path.join(__dirname, '../data/tmp', 'temp.zip');
+      console.log(`📋 Copying EPUB to temp zip: ${tempZipPath}`);
       fs.copyFileSync(originalPath, tempZipPath);
-      await this.execAsync(
-        `powershell -Command "Expand-Archive -Path '${tempZipPath}' -DestinationPath '${oldEpubDir}' -Force"`
-      );
+      console.log('✅ EPUB copied to temp zip successfully');
 
-      // STEP 3: Process and translate files directly in the extracted EPUB
-      console.log('STEP 3: Processing files directly in extracted EPUB...');
-      const newEpubDir = path.join(oldEpubDir, 'OEBPS', 'xhtml');
+      // Check if temp zip was created successfully
+      if (!fs.existsSync(tempZipPath)) {
+        throw new Error(`Failed to create temp zip file: ${tempZipPath}`);
+      }
+      const zipStats = fs.statSync(tempZipPath);
+      console.log(`📊 Temp zip file size: ${zipStats.size} bytes`);
+
+      const powershellCommand = `powershell -Command "Expand-Archive -Path '${tempZipPath}' -DestinationPath '${oldEpubDir}' -Force"`;
+      console.log(`🔧 PowerShell command: ${powershellCommand}`);
+
+      try {
+        console.log('⚡ Executing PowerShell extraction...');
+        console.log('⏱️ Starting extraction timer...');
+        const startTime = Date.now();
+
+        await this.execAsync(powershellCommand);
+        const extractionTime = Date.now() - startTime;
+        console.log(`✅ EPUB extraction completed successfully in ${extractionTime}ms`);
+      } catch (error) {
+        console.error('❌ PowerShell extraction failed:', error);
+        console.error('Error details:', {
+          message: error instanceof Error ? error.message : 'Unknown error',
+          code: (error as { code?: string })?.code,
+          stdout: (error as { stdout?: string })?.stdout,
+          stderr: (error as { stderr?: string })?.stderr,
+        });
+        throw new Error(
+          `Failed to extract EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
+      }
+
+      // STEP 3: Detect EPUB content directory structure
+      console.log('📝 STEP 3: Checking if the extracted EPUB getting directory...');
+      const contentDirectory = this.detectEpubContentDirectory(oldEpubDir);
+
+      // STEP 4: Find all files in the extracted EPUB
+      // TODO MAKE METHOD TEST WITH OLD ALSO.
+      console.log('\n📝 STEP 4: Finding all files in the extracted EPUB...');
+      console.log(`📂 Final EPUB content directory: ${contentDirectory}`);
+      if (!fs.existsSync(contentDirectory)) {
+        console.error('❌ EPUB content directory not found:', contentDirectory);
+        throw new Error(`EPUB content directory not found: ${contentDirectory}`);
+      }
+
+      // const allFiles = fs.readdirSync(contentDirectory);
+      // console.log(`📋 All files in directory:`, allFiles);
       let filesToTranslate = fs
-        .readdirSync(newEpubDir)
+        .readdirSync(contentDirectory)
         .filter(f => f.endsWith('.xhtml') || f.endsWith('.html'))
-        .filter(f => f.includes('chapter')); // Only translate chapter files
+        .filter(f => f.includes('chapter') || f.includes('ch')); // Only translate chapter files depends on filenames.
+      console.log(`📚 Files to translate:`, filesToTranslate);
+      if (filesToTranslate.length === 0) {
+        console.error('❌ No files to translate found');
+        throw new Error('No files to translate found');
+      }
 
       // DEBUG TESTING - only process one specific file
-      const testFile = 'chapter10.xhtml'; // Set to undefined to process all files
+      // const testFile = 'chapter10.xhtml'; // Set to undefined to process all files
+      const testFile = 'ch01.xhtml'; // Set to undefined to process all files
       if (testFile) {
         if (filesToTranslate.includes(testFile)) {
           console.log(`TEST MODE: Only processing file: ${testFile}`);
@@ -422,18 +520,21 @@ export class TranslationService {
         }
       }
 
+      // Step 5: Begin translating each file.
+      console.log('\n📝 STEP 5: Begin Translating each file...');
       for (let i = 0; i < filesToTranslate.length; i++) {
         const file = filesToTranslate[i];
-        const filePath = path.join(newEpubDir, file);
+        const filePath = path.join(contentDirectory, file);
 
         console.log(
           `Processing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`
         );
+        console.log(`DEBUG: Translating file: ${filePath}`);
         await this.translateFile(filePath, targetLang, sourceLang);
       }
 
-      // Step 3: Create EPUB with proper structure using 7zip.
-      console.log('Step 3: Creating EPUB with proper structure...');
+      // Step 6: Create EPUB with proper structure using 7zip.
+      console.log('\n📝 STEP 6: Creating EPUB with proper structure...');
       console.log('Creating EPUB using 7zip...');
       try {
         await this.execAsync(
@@ -463,5 +564,68 @@ export class TranslationService {
         `Failed to repackage EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
+  }
+
+  /**
+   * Detects the EPUB content directory structure
+   * @param oldEpubDir - Directory where the EPUB was extracted
+   * @returns string - Path to the content directory
+   */
+  private detectEpubContentDirectory(oldEpubDir: string): string {
+    // Determine the correct content directory based on EPUB structure
+    let contentDirectory: string;
+    const oebpsPath = path.join(oldEpubDir, 'OEBPS');
+
+    if (fs.existsSync(oebpsPath)) {
+      // Standard EPUB structure
+      const xhtmlPath = path.join(oebpsPath, 'xhtml');
+      if (fs.existsSync(xhtmlPath)) {
+        contentDirectory = xhtmlPath;
+        console.log(`📂 Using standard EPUB structure: ${contentDirectory}`);
+      } else {
+        // OEBPS exists but no xhtml subdirectory, check OEBPS directly
+        contentDirectory = oebpsPath;
+        console.log(`📂 Using OEBPS directory directly: ${contentDirectory}`);
+      }
+    } else {
+      // Alternative EPUB structure - look for HTML files in root or subdirectories
+      console.log('🔍 Using alternative EPUB structure...');
+      const findContentDir = (dir: string): string | null => {
+        try {
+          const items = fs.readdirSync(dir);
+          const htmlFiles = items.filter(
+            f => f.endsWith('.xhtml') || f.endsWith('.html') || f.endsWith('.htm')
+          );
+
+          if (htmlFiles.length > 0) {
+            console.log(`📚 Found HTML files in: ${dir}`);
+            return dir;
+          }
+
+          // Check subdirectories
+          for (const item of items) {
+            const fullPath = path.join(dir, item);
+            const stat = fs.statSync(fullPath);
+            if (stat.isDirectory()) {
+              const subDirResult = findContentDir(fullPath);
+              if (subDirResult) return subDirResult;
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️ Could not read directory ${dir}:`, error);
+        }
+        return null;
+      };
+
+      const detectedDir = findContentDir(oldEpubDir);
+      if (detectedDir) {
+        contentDirectory = detectedDir;
+        console.log(`📂 Using alternative EPUB structure: ${contentDirectory}`);
+      } else {
+        throw new Error('No HTML/XHTML files found in EPUB');
+      }
+    }
+
+    return contentDirectory;
   }
 }

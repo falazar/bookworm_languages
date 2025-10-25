@@ -112,8 +112,8 @@
             const sourceSelect = document.getElementById('sourceLanguage');
             sourceSelect.value = lastSourceLang;
             
-            // Set default target language to last used or Spanish as fallback
-            const lastTargetLang = localStorage.getItem('lastTargetLanguage') || 'es';
+            // Set default target language to last used or French as fallback
+            const lastTargetLang = localStorage.getItem('lastTargetLanguage') || 'fr';
             const targetSelect = document.getElementById('targetLanguage');
             targetSelect.value = lastTargetLang;
             
@@ -157,6 +157,13 @@
                 statusText.textContent = 'Preparing translation...';
                 
                 // Make translation request
+                console.log('🚀 Sending translation request...');
+                console.log('Request data:', {
+                    filename: filename,
+                    sourceLanguage: sourceLanguage,
+                    targetLanguage: targetLanguage
+                });
+                
                 const response = await fetch('/translate-book', {
                     method: 'POST',
                     headers: {
@@ -169,10 +176,21 @@
                     })
                 });
                 
+                console.log('📡 Response received:', response.status, response.statusText);
+                
                 progressFill.style.width = '60%';
                 statusText.textContent = 'Translating content...';
                 
-                const result = await response.json();
+                let result;
+                try {
+                    result = await response.json();
+                    console.log('📄 Response JSON:', result);
+                } catch (jsonError) {
+                    console.error('❌ Failed to parse JSON response:', jsonError);
+                    const textResponse = await response.text();
+                    console.error('📄 Raw response text:', textResponse);
+                    throw new Error(`Server returned invalid JSON: ${textResponse}`);
+                }
                 
                 if (result.success) {
                     progressFill.style.width = '100%';

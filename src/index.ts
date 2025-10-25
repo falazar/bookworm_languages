@@ -1,9 +1,11 @@
 import express from 'express';
-import path from 'path';
 import fs from 'fs';
 import multer from 'multer';
+import path from 'path';
 import { fileURLToPath } from 'url';
 import { TranslationService } from './translation-service.js';
+
+console.log('🚀 Starting server...');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -48,6 +50,19 @@ const upload = multer({
 
 // Middleware
 app.use(express.static(path.join(__dirname, '../public')));
+
+// Request logging middleware - MUST be before JSON parsing
+app.use((req, res, next) => {
+  try {
+    console.log(`\n🌐 ${new Date().toISOString()} - ${req.method} ${req.path}`);
+    // console.log('Headers:', req.headers);
+    next();
+  } catch (error) {
+    console.error('❌ Error in request logging middleware:', error);
+    next(error);
+  }
+});
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -138,25 +153,37 @@ app.get('/translate/:filename', (req, res) => {
 });
 
 app.post('/translate-book', async (req, res) => {
+  console.log('\n=== TRANSLATION REQUEST RECEIVED ===');
+  console.log('Request body:', req.body);
+
   try {
     const { filename, sourceLanguage, targetLanguage } = req.body;
+    console.log('Extracted parameters:', { filename, sourceLanguage, targetLanguage });
 
     if (!filename || !targetLanguage) {
+      console.log('ERROR: Missing required parameters');
       return res.status(400).json({ error: 'Filename and target language are required' });
     }
 
+    console.log('Starting translation service...');
     const translatedText = await translationService.translateBook(
       filename,
       targetLanguage,
       sourceLanguage === 'auto' ? 'auto' : sourceLanguage
     );
 
+    console.log('Translation completed successfully');
     res.json({
       success: true,
       translatedText: translatedText,
     });
   } catch (error) {
-    console.error('Translation error:', error);
+    console.error('\n=== TRANSLATION ERROR ===');
+    console.error('Error type:', typeof error);
+    console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
+    console.error('Full error object:', error);
+
     res.status(500).json({
       error: 'Translation failed',
       message: error instanceof Error ? error.message : 'Unknown error occurred',
@@ -171,7 +198,37 @@ app.get('/hello', (req, res) => {
   });
 });
 
+// Test endpoint to verify server is working
+app.get('/test', (req, res) => {
+  console.log('🧪 TEST ENDPOINT HIT');
+  res.json({
+    success: true,
+    message: 'Server is working!',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
+});
+
+// Graceful shutdown handling
+process.on('SIGINT', () => {
+  console.log('\n🛑 Received SIGINT (Ctrl+C). Shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed successfully');
+    process.exit(0);
+  });
+});
+
+// Global error handler
+app.use((error: any, req: any, res: any, next: any) => {
+  console.error('\n💥 GLOBAL ERROR HANDLER TRIGGERED');
+  console.error('Error:', error);
+  console.error('Request:', req.method, req.path);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: error.message || 'Unknown error occurred',
+  });
 });

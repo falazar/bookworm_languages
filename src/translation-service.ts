@@ -1,4 +1,5 @@
 import { exec } from 'child_process';
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import puppeteer from 'puppeteer';
@@ -13,6 +14,16 @@ export class TranslationService {
   private debugMode = false; // Set to false to enable real translation
   private debugFlag = true; // Set to false to process all chapters
   private execAsync = promisify(exec);
+  private cacheDir = path.join(__dirname, '../data/cache');
+  private cacheMap = new Map<string, string>(); // In-memory cache
+
+  constructor() {
+    // Initialize cache directory
+    if (!fs.existsSync(this.cacheDir)) {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+    }
+    this.loadCache();
+  }
 
   /**
    * Translates an EPUB book file to the target language
@@ -33,21 +44,20 @@ export class TranslationService {
     console.log(`🌍 Source Language: ${sourceLang}`);
 
     try {
-      // Clean up temp directory with proper error handling
-      const tmpDir = path.join(__dirname, '../data/tmp');
-      const oldEpubDir = path.join(__dirname, '../data/old_epub');
+      const tmpDir = path.join(__dirname, '../data/tmp'); // unused?
+      // const oldEpubDir = path.join(__dirname, '../data/old_epub');
 
       // Remove directories if they exist
       if (fs.existsSync(tmpDir)) {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
-      if (fs.existsSync(oldEpubDir)) {
-        fs.rmSync(oldEpubDir, { recursive: true, force: true });
-      }
+      // if (fs.existsSync(oldEpubDir)) {
+      //   fs.rmSync(oldEpubDir, { recursive: true, force: true });
+      // }
 
       // Create directories
       fs.mkdirSync(tmpDir, { recursive: true });
-      fs.mkdirSync(oldEpubDir, { recursive: true });
+      // fs.mkdirSync(oldEpubDir, { recursive: true });
 
       // Open and read the EPUB file
       const filePath = path.join(__dirname, '../data/uploads', filename);
@@ -93,11 +103,17 @@ export class TranslationService {
     try {
       const originalContent = fs.readFileSync(filePath, 'utf8');
 
+      // See if new file has translated text in it or not yet, if any then skip...
+      const translatedContentCheck = fs.readFileSync(filePath, 'utf8');
+      if (translatedContentCheck.includes('<p class="translated">')) {
+        console.log(`--Skipping file ${path.basename(filePath)} as it has already been translated`);
+        return;
+      }
+
       // Parse file line by line and chunk for translation
       const lines = originalContent.split('\n');
       let translatedContent = '';
       let i = 0;
-
       while (i < lines.length) {
         if (i > 2222) {
           console.log(`DEBUG: Breaking out of loop at line ${i}`);
@@ -124,30 +140,33 @@ export class TranslationService {
 
         // Translate the chunk
         console.log(
-          '\n#######################################################\n' +
-            'DEBUG: START TRANSLATING CHUNK #',
-          chunkStart + 1,
-          '-',
-          i,
-          'of',
-          lines.length
+          // `\n#######################################################` +
+          `\nSTART TRANSLATING CHUNK #${chunkStart + 1}-${i} of ${lines.length}`
         );
         const translatedChunk = await this.translateChunk(chunk, targetLang, sourceLang);
         translatedContent += translatedChunk;
 
-        const chars = chunk.length;
-        console.log(
-          `\nProcessed chunk ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters`
-        );
+        // const chars = chunk.length;
+        // TODO Add minute in front of this and turn it yellow color.
+        // console.log(
+        //   `\nProcessed chunk ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters`
+        // );
         // console.log(`DEBUG: Translated chunk:`, translatedChunk);
       } // while i
 
       // Write translated content back to the same file
       fs.writeFileSync(filePath, translatedContent);
-      console.log(`DEBUG: Translated and updated: ${filePath}`);
+      // console.log(`DEBUG: Translated and updated: ${filePath}`);
       console.log(`Translated and updated: ${path.basename(filePath)}`);
+
+      // Add 45 second delay after each file processing
+      console.log('⏱️ Waiting 160 seconds before processing next file...');
+      await new Promise(resolve => setTimeout(resolve, 160000)); // was 125.
+      console.log('✅ Delay complete, continuing to next file...');
     } catch (error) {
       console.error(`Error translating file ${filePath}:`, error);
+      // rethrow the error
+      throw error;
     }
   }
 
@@ -174,8 +193,8 @@ export class TranslationService {
     let result = '';
 
     // show length of both original and translated lines
-    console.log('\nDEBUG: ORIGINAL LINES:', originalLines.length);
-    console.log('\nDEBUG: TRANSLATED LINES:', translatedLines.length);
+    // console.log('\nDEBUG: ORIGINAL LINES:', originalLines.length);
+    // console.log('DEBUG: TRANSLATED LINES:', translatedLines.length);
 
     // Track counters separately for original and translated lines
     let originalIndex = 0;
@@ -249,6 +268,16 @@ export class TranslationService {
       return 'FAKE TRANSLATED TEXT';
     }
 
+    // Check cache first
+    const cacheKey = this.getCacheKey(text, targetLang, sourceLang);
+    const cached = this.getFromCache(cacheKey);
+    if (cached) {
+      console.log('✅ Using cached translation');
+      return cached;
+    }
+
+    console.log('🔄 Fetching new translation...');
+
     let browser;
     try {
       // URL encode the text
@@ -268,27 +297,27 @@ export class TranslationService {
       text = text.replace('’', "'");
 
       // Check for an over limit size maybe here?
-      if (text.length > 1000) {
+      if (text.length > 5000) {
         console.log('DEBUG: Text length:', text.length);
         console.log('ERROR: Text is too long to translate, debug test shortening.');
         // chop it for testing...
-        text = text.substring(0, 1000);
+        text = text.substring(0, 5000);
         // console.log('Chopped text to:', text);
       }
 
       const encodedText = encodeURIComponent(text);
       if (debugLogs) {
-        console.log('\nDEBUG: BEFORE ENCODING TEXT:', text);
+        // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
         // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
       }
 
       // Build the translation URL
       const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
       if (debugLogs) {
-        // console.log('\nDEBUG url', url);
+        // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
       }
 
-      // Launch Puppeteer browser
+      // Launch Puppeteer browser with stealth settings
       browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -299,21 +328,74 @@ export class TranslationService {
           '--no-first-run',
           '--no-zygote',
           '--disable-gpu',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--window-size=1366,768',
+          '--start-maximized',
+          '--lang=en-US,en',
         ],
       });
       const page = await browser.newPage();
-      // Set user agent and viewport
-      await page.setExtraHTTPHeaders({
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+
+      // Set realistic user agent
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      );
+
+      // Remove webdriver property
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(
+          (window as unknown as { navigator: { webdriver?: boolean } }).navigator,
+          'webdriver',
+          {
+            get: () => false,
+          }
+        );
       });
+
+      // Add chrome object
+      await page.evaluateOnNewDocument(() => {
+        (window as unknown as { chrome?: unknown }).chrome = {
+          runtime: {},
+        };
+      });
+
+      // Override plugins
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(
+          (window as unknown as { navigator: { plugins?: unknown[] } }).navigator,
+          'plugins',
+          {
+            get: () => [1, 2, 3, 4, 5],
+          }
+        );
+      });
+
+      // Add languages
+      await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(
+          (window as unknown as { navigator: { languages?: string[] } }).navigator,
+          'languages',
+          {
+            get: () => ['en-US', 'en'],
+          }
+        );
+      });
+
+      // Set extra headers
+      await page.setExtraHTTPHeaders({
+        'Accept-Language': 'en-US,en;q=0.9',
+      });
+
       await page.setViewport({ width: 1366, height: 768 });
 
       // Navigate to Google Translate
-      console.log('\nLoading Google Translate page...');
+      // console.log('\nLoading Google Translate page...');
       await page.goto(url, {
         waitUntil: 'networkidle2',
-        timeout: 10000,
+        // timeout: 10000,
+        timeout: 100000,
       });
 
       // Try to find the translation result
@@ -323,7 +405,13 @@ export class TranslationService {
       //   console.log('Waiting for translation to load...');
       // Delay here for page load and also not to hit translation server too fast!
       // await new Promise(resolve => setTimeout(resolve, 3000)); // Was 3 second lowered to 1.
-      await new Promise(resolve => setTimeout(resolve, 6000)); // Was 3 second lowered to 1.
+      // await new Promise(resolve => setTimeout(resolve, 6000)); // Was 6 second raised from 3.
+      // failed on first part of chapter two, increasing from 6 to 10.
+      // await new Promise(resolve => setTimeout(resolve, 10000)); // Was 10 second raised from 6. 2 sections done on ch2 then failed.
+      // await new Promise(resolve => setTimeout(resolve, 20000)); // Was 10 raised to 20 4 sections in ch2 then failed.
+      // It seems to be showing spanish version after this limit.
+      await new Promise(resolve => setTimeout(resolve, 35000)); // Was 20 raised to 30 ?
+
       // 1 seemed to work ok. not working now
       // 2 was working ok for alot, back up to 3 to test larger.
       // 400 was too fast or the ones before it were, hmmm
@@ -333,7 +421,7 @@ export class TranslationService {
       const pageContent = await page.content();
       const tempFilePath = path.join(__dirname, '../temp_translated_full.html');
       fs.writeFileSync(tempFilePath, pageContent);
-      console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
+      // console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
 
       if (!translation) {
         throw new Error(
@@ -341,7 +429,7 @@ export class TranslationService {
         );
       }
 
-      //   console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
+      // console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
 
       // First decode URL encoding, then HTML entities
       let decodedTranslation = translation
@@ -365,7 +453,12 @@ export class TranslationService {
         .replace(/id = /g, 'id=')
         .replace(/role = /g, 'role=');
 
-      console.log('\nDEBUG: AFTER HTML DECODING:', decodedTranslation);
+      // add turquiose color for debug text
+      // console.log('\n\x1b[36mDEBUG: TRANSLATED TEXT AFTER HTML DECODING: ', decodedTranslation, '\x1b[0m');
+
+      // Save to cache before returning.
+      this.saveToCache(cacheKey, decodedTranslation);
+      // console.log('💾 Translation saved to cache');
 
       return decodedTranslation;
     } catch (error) {
@@ -402,7 +495,7 @@ export class TranslationService {
         const textMatch = match.match(/data-text="([^"]*(?:\\.[^"]*)*)"/);
 
         if (languageMatch && textMatch && languageMatch[1] !== 'English') {
-          console.log('DEBUG: Found text match:', textMatch[1]);
+          // console.log('DEBUG: Found text match:', textMatch[1]);
           return textMatch[1];
         }
       }
@@ -433,54 +526,17 @@ export class TranslationService {
 
       // STEP 1: Setup dirs.
       console.log('\n📝 STEP 1: Setting up directories...');
-      // Remove old EPUB if exists
-      if (fs.existsSync(outputPath)) {
-        fs.unlinkSync(outputPath);
-      }
       // Create temp directory for extraction
       const oldEpubDir = path.join(__dirname, '../data/old_epub');
       if (fs.existsSync(oldEpubDir)) {
-        fs.rmSync(oldEpubDir, { recursive: true, force: true });
-      }
-      fs.mkdirSync(oldEpubDir, { recursive: true });
+        console.log('📁 Old EPUB directory already exists, skipping creation and continuing...');
+      } else {
+        fs.mkdirSync(oldEpubDir, { recursive: true });
+        console.log('📁 Created new EPUB directory for extraction');
 
-      // STEP 2: Extract using PowerShell (now that it's a .zip file)
-      console.log(`\n📦 STEP 2: Extracting EPUB... ${new Date().toISOString()}`);
-      // Copy EPUB to temp location and rename to .zip for PowerShell
-      const tempZipPath = path.join(__dirname, '../data/tmp', 'temp.zip');
-      console.log(`📋 Copying EPUB to temp zip: ${tempZipPath}`);
-      fs.copyFileSync(originalPath, tempZipPath);
-      console.log('✅ EPUB copied to temp zip successfully');
-
-      // Check if temp zip was created successfully
-      if (!fs.existsSync(tempZipPath)) {
-        throw new Error(`Failed to create temp zip file: ${tempZipPath}`);
-      }
-      const zipStats = fs.statSync(tempZipPath);
-      console.log(`📊 Temp zip file size: ${zipStats.size} bytes`);
-
-      const powershellCommand = `powershell -Command "Expand-Archive -Path '${tempZipPath}' -DestinationPath '${oldEpubDir}' -Force"`;
-      console.log(`🔧 PowerShell command: ${powershellCommand}`);
-
-      try {
-        console.log('⚡ Executing PowerShell extraction...');
-        console.log('⏱️ Starting extraction timer...');
-        const startTime = Date.now();
-
-        await this.execAsync(powershellCommand);
-        const extractionTime = Date.now() - startTime;
-        console.log(`✅ EPUB extraction completed successfully in ${extractionTime}ms`);
-      } catch (error) {
-        console.error('❌ PowerShell extraction failed:', error);
-        console.error('Error details:', {
-          message: error instanceof Error ? error.message : 'Unknown error',
-          code: (error as { code?: string })?.code,
-          stdout: (error as { stdout?: string })?.stdout,
-          stderr: (error as { stderr?: string })?.stderr,
-        });
-        throw new Error(
-          `Failed to extract EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+        // STEP 2: Extract EPUB using PowerShell
+        console.log(`\n📦 STEP 2: Extracting EPUB... ${new Date().toISOString()}`);
+        await this.extractEpubWithPowerShell(originalPath, oldEpubDir);
       }
 
       // STEP 3: Detect EPUB content directory structure
@@ -510,7 +566,8 @@ export class TranslationService {
 
       // DEBUG TESTING - only process one specific file
       // const testFile = 'chapter10.xhtml'; // Set to undefined to process all files
-      const testFile = 'ch01.xhtml'; // Set to undefined to process all files
+      // const testFile = 'ch01.xhtml'; // Set to undefined to process all files
+      const testFile = ''; // Set to undefined to process all files
       if (testFile) {
         if (filesToTranslate.includes(testFile)) {
           console.log(`TEST MODE: Only processing file: ${testFile}`);
@@ -520,21 +577,28 @@ export class TranslationService {
         }
       }
 
-      // Step 5: Begin translating each file.
+      // Step 5: Begin translating each file from where we left off.
       console.log('\n📝 STEP 5: Begin Translating each file...');
       for (let i = 0; i < filesToTranslate.length; i++) {
         const file = filesToTranslate[i];
         const filePath = path.join(contentDirectory, file);
 
         console.log(
-          `Processing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`
+          `\nProcessing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`
         );
-        console.log(`DEBUG: Translating file: ${filePath}`);
+        // console.log(`DEBUG: Translating file: ${filePath}`);
         await this.translateFile(filePath, targetLang, sourceLang);
+
+        // TEMP STOP AFTER chapter 10
+        // if (i >= 10) {
+        //   console.log('TEMP STOP AFTER chapter 10');
+        //   break;
+        // }
       }
 
       // Step 6: Create EPUB with proper structure using 7zip.
       console.log('\n📝 STEP 6: Creating EPUB with proper structure...');
+
       console.log('Creating EPUB using 7zip...');
       try {
         await this.execAsync(
@@ -556,6 +620,13 @@ export class TranslationService {
       }
 
       console.log(`EPUB repackaged successfully: ${outputPath}`);
+
+      // CLean up Remove old_epub dir at the end.
+      // if (fs.existsSync(oldEpubDir)) {
+      //   fs.rmSync(oldEpubDir, { recursive: true, force: true });
+      // cleanup cache dir todo
+      // }
+
       console.log(`COMPLETED \n\n\n`);
       return outputPath;
     } catch (error) {
@@ -627,5 +698,109 @@ export class TranslationService {
     }
 
     return contentDirectory;
+  }
+
+  /**
+   * Extracts EPUB file using PowerShell
+   * @param originalPath - Path to the original EPUB file
+   * @param oldEpubDir - Directory to extract the EPUB to
+   */
+  private async extractEpubWithPowerShell(originalPath: string, oldEpubDir: string): Promise<void> {
+    // Copy EPUB to temp location and rename to .zip for PowerShell
+    const tempZipPath = path.join(__dirname, '../data/tmp', 'temp.zip');
+    console.log(`📋 Copying EPUB to temp zip: ${tempZipPath}`);
+    fs.copyFileSync(originalPath, tempZipPath);
+    console.log('✅ EPUB copied to temp zip successfully');
+
+    // Check if temp zip was created successfully
+    if (!fs.existsSync(tempZipPath)) {
+      throw new Error(`Failed to create temp zip file: ${tempZipPath}`);
+    }
+    const zipStats = fs.statSync(tempZipPath);
+    console.log(`📊 Temp zip file size: ${zipStats.size} bytes`);
+
+    const powershellCommand = `powershell -Command "Expand-Archive -Path '${tempZipPath}' -DestinationPath '${oldEpubDir}' -Force"`;
+    console.log(`🔧 PowerShell command: ${powershellCommand}`);
+
+    try {
+      console.log('⚡ Executing PowerShell extraction...');
+      console.log('⏱️ Starting extraction timer...');
+      const startTime = Date.now();
+
+      await this.execAsync(powershellCommand);
+      const extractionTime = Date.now() - startTime;
+      console.log(`✅ EPUB extraction completed successfully in ${extractionTime}ms`);
+    } catch (error) {
+      console.error('❌ PowerShell extraction failed:', error);
+      console.error('Error details:', {
+        message: error instanceof Error ? error.message : 'Unknown error',
+        code: (error as { code?: string })?.code,
+        stdout: (error as { stdout?: string })?.stdout,
+        stderr: (error as { stderr?: string })?.stderr,
+      });
+      throw new Error(
+        `Failed to extract EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  /**
+   * Cache management methods
+   */
+  private getCacheKey(text: string, targetLang: string, sourceLang: string): string {
+    // Create a hash of the text + language settings
+    const hash = crypto
+      .createHash('md5')
+      .update(text + targetLang + sourceLang)
+      .digest('hex');
+    return hash;
+  }
+
+  private getFromCache(cacheKey: string): string | null {
+    // Check in-memory cache first
+    if (this.cacheMap.has(cacheKey)) {
+      return this.cacheMap.get(cacheKey)!;
+    }
+
+    // Check file cache
+    const cacheFile = path.join(this.cacheDir, `${cacheKey}.txt`);
+    if (fs.existsSync(cacheFile)) {
+      const cached = fs.readFileSync(cacheFile, 'utf8');
+      // Store in memory for faster access
+      this.cacheMap.set(cacheKey, cached);
+      return cached;
+    }
+
+    return null;
+  }
+
+  private saveToCache(cacheKey: string, translation: string): void {
+    // Save to in-memory cache
+    this.cacheMap.set(cacheKey, translation);
+
+    // Save to file cache
+    const cacheFile = path.join(this.cacheDir, `${cacheKey}.txt`);
+    fs.writeFileSync(cacheFile, translation, 'utf8');
+  }
+
+  private loadCache(): void {
+    // Load all cache files into memory
+    try {
+      const files = fs.readdirSync(this.cacheDir);
+      let loaded = 0;
+      for (const file of files) {
+        if (file.endsWith('.txt')) {
+          const cacheKey = path.basename(file, '.txt');
+          const content = fs.readFileSync(path.join(this.cacheDir, file), 'utf8');
+          this.cacheMap.set(cacheKey, content);
+          loaded++;
+        }
+      }
+      if (loaded > 0) {
+        console.log(`📚 Loaded ${loaded} cached translations from disk`);
+      }
+    } catch {
+      console.log('No existing cache found, starting fresh');
+    }
   }
 }

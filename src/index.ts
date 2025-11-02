@@ -34,10 +34,7 @@ const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
     // Accept only EPUB files
-    if (
-      file.mimetype === 'application/epub+zip' ||
-      path.extname(file.originalname).toLowerCase() === '.epub'
-    ) {
+    if (file.mimetype === 'application/epub+zip' || path.extname(file.originalname).toLowerCase() === '.epub') {
       cb(null, true);
     } else {
       cb(new Error('Only EPUB files are allowed!'));

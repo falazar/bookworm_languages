@@ -5,6 +5,7 @@ import path from 'path';
 import puppeteer from 'puppeteer';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
+import * as cheerio from 'cheerio';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -32,11 +33,7 @@ export class TranslationService {
    * @param sourceLang - Source language code or 'auto' for auto-detection
    * @returns Promise<string> - The translated text content
    */
-  async translateBook(
-    filename: string,
-    targetLang: string,
-    sourceLang: string = 'auto'
-  ): Promise<string> {
+  async translateBook(filename: string, targetLang: string, sourceLang: string = 'auto'): Promise<string> {
     const startTime = new Date();
     console.log(`\n🚀 TRANSLATION STARTED: ${startTime.toISOString()}`);
     console.log(`📁 Filename: ${filename}`);
@@ -83,9 +80,7 @@ export class TranslationService {
       return `Translation complete! New EPUB created: ${path.basename(newEPUBPath)}`;
     } catch (error) {
       console.error('Error opening EPUB file:', error);
-      throw new Error(
-        `Failed to open EPUB file: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new Error(`Failed to open EPUB file: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -95,11 +90,7 @@ export class TranslationService {
    * @param targetLang - Target language code
    * @param sourceLang - Source language code
    */
-  private async translateFile(
-    filePath: string,
-    targetLang: string,
-    sourceLang: string
-  ): Promise<void> {
+  private async translateFile(filePath: string, targetLang: string, sourceLang: string): Promise<void> {
     try {
       const originalContent = fs.readFileSync(filePath, 'utf8');
 
@@ -109,8 +100,11 @@ export class TranslationService {
         console.log(`--Skipping file ${path.basename(filePath)} as it has already been translated`);
         return;
       }
+      const DEBUG_TESTING = false;
 
-      // Parse file line by line and chunk for translation
+      // TODO: DIVIDE THIS METHOD UP A LITTLE BIT?
+      // TODO parse out header and readd also.
+      // STEP 1: Parse file line by line and chunk for translation
       const lines = originalContent.split('\n');
       let translatedContent = '';
       let i = 0;
@@ -120,13 +114,12 @@ export class TranslationService {
           break;
         }
 
-        // Build chunk until we hit >= 5000 chars
+        // STEP 2: Build chunk until we hit >= 5000 chars
         let chunk = '';
         let chunkStart = i;
-
         while (i < lines.length) {
           const line = lines[i];
-          const lineWithNewline = line + '\n';
+          const lineWithNewline = line + '\n'; // may not need this?
 
           // Check if adding this line would exceed safe URL limit
           if (chunk.length + lineWithNewline.length > 4700) {
@@ -138,33 +131,50 @@ export class TranslationService {
           i++;
         }
 
-        // Translate the chunk
+        // STEP 3: Translate the chunk.
         console.log(
           // `\n#######################################################` +
           `\nSTART TRANSLATING CHUNK #${chunkStart + 1}-${i} of ${lines.length}`
         );
         const translatedChunk = await this.translateChunk(chunk, targetLang, sourceLang);
+        // Append all text to our content.
         translatedContent += translatedChunk;
 
-        // const chars = chunk.length;
-        // TODO Add minute in front of this and turn it yellow color.
-        // console.log(
-        //   `\nProcessed chunk ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters`
-        // );
-        // console.log(`DEBUG: Translated chunk:`, translatedChunk);
+        // DEBUG OUTPUT:
+        const chars = chunk.length;
+        // Print debug lines in purple
+        console.log(
+          `\x1b[35m\nDEBUG: Processed chunk lines ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters\x1b[0m`
+        );
+        // console.log(`\x1b[35mDEBUG: Translated chunk:\x1b[0m`, translatedChunk);
+
+        if (DEBUG_TESTING) {
+          console.log('DEBUG TESTING: Breaking after first chunk');
+          break; // Break after first chunk for testing
+        }
       } // while i
+      // Part 3: Close body and html tags.
+      translatedContent += '</body>\n</html>\n' + '</xml>';
+      //
 
       // Write translated content back to the same file
+      if (DEBUG_TESTING) {
+        // Rename file slightly so it doesnt overwrite us.
+        filePath = filePath.replace('.html', '_FR.html');
+      }
       fs.writeFileSync(filePath, translatedContent);
       // console.log(`DEBUG: Translated and updated: ${filePath}`);
       console.log(`Translated and updated: ${path.basename(filePath)}`);
 
       // Add 45 second delay after each file processing
-      console.log('⏱️ Waiting 160 seconds before processing next file...');
-      await new Promise(resolve => setTimeout(resolve, 160000)); // was 125.
-      console.log('✅ Delay complete, continuing to next file...');
+      if (!DEBUG_TESTING) {
+        console.log('⏱️ Waiting 160 seconds before processing next file...');
+        await new Promise(resolve => setTimeout(resolve, 160000)); // was 125.
+        console.log('✅ Delay complete, continuing to next file...');
+      }
     } catch (error) {
-      console.error(`Error translating file ${filePath}:`, error);
+      // console.error(`Error translating file ${filePath}:`, error);
+      console.error(`Error translating file ${filePath}`);
       // rethrow the error
       throw error;
     }
@@ -177,75 +187,81 @@ export class TranslationService {
    * @param sourceLang - Source language code
    * @returns Promise<string> - The translated chunk
    */
-  private async translateChunk(
-    chunk: string,
-    targetLang: string,
-    sourceLang: string
-  ): Promise<string> {
+  private async translateChunk(chunk: string, targetLang: string, sourceLang: string): Promise<string> {
     // First, translate only the text content
     // Extract only text content from the chunk (remove HTML tags)
-    const textOnly = chunk.replace(/<[^>]*>/g, '').trim();
-    const translatedChunk = await this.translateText(textOnly, targetLang, sourceLang);
+
+    const debugFlag = true;
+
+    // Use Cheerio to parse partial page.
+    const $ = cheerio.load(chunk, { xmlMode: true });
+    const header = $('head').html() || '';
+    // const paragraphs = $('body p')
+    const paragraphs = $('p')
+      .map((_, el) => $(el).text().trim())
+      .get();
+    // console.log('DEBUG Header:', header);
+    console.log('DEBUG Paragraphs length:', paragraphs.length);
+    // console.log('DEBUG Paragraphs:', paragraphs);
+
+    const textOnly = paragraphs.join('\n\n'); // Join paragraphs with double newlines
+    // Google honors that on translation so far.
+
+    // For testing we can turn on or off cache.
+    let useCache = true;
+    if (debugFlag) {
+      // useCache = true; // flip depending on your test need.
+      // console.log('\n\x1b[33mDEBUG: Skipping cache for testing purposes\x1b[0m');
+    }
+
+    const translatedChunk = await this.translateText(textOnly, targetLang, sourceLang, useCache);
 
     // Then split both original and translated into lines and intersperse them
-    const originalLines = chunk.split('\n');
-    const translatedLines = translatedChunk.split('\n');
-    let result = '';
+    const originalLines = textOnly.split('\n\n');
+    const translatedLines = translatedChunk.split('\n\n');
 
-    // show length of both original and translated lines
-    // console.log('\nDEBUG: ORIGINAL LINES:', originalLines.length);
-    // console.log('DEBUG: TRANSLATED LINES:', translatedLines.length);
+    let returnText = '';
 
-    // Track counters separately for original and translated lines
+    // Show length of both original and translated lines in purple
+    console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+    console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
+    if (originalLines.length !== translatedLines.length) {
+      console.log('WARN: Line count mismatch between original and translated.');
+    }
+    console.log(`\x1b[35m\nDEBUG: STARTING TO MERGE ORIGINAL AND TRANSLATED LINES...\x1b[0m`);
+    console.log(`-------------------------------------------------------`);
+
+    console.log('\x1b[35moriginalLines:', originalLines);
+    console.log('\x1b[35mtranslatedLines:', translatedLines);
+
+    // PART 1: Write header back on top.
+    if (header) {
+      returnText +=
+        "<?xml version='1.0' encoding='utf-8'?>\n" +
+        '<html xmlns="http://www.w3.org/1999/xhtml">\n' +
+        '<head>\n' +
+        header +
+        '\n</head>\n' +
+        '<body class="calibre">\n';
+    }
+
+    // PART 2: Fill in body p tags.
     let originalIndex = 0;
     let translatedIndex = 0;
-    while (
-      originalIndex < 1000 &&
-      (originalIndex < originalLines.length || translatedIndex < translatedLines.length)
-    ) {
+    while (originalIndex < 1000 && (originalIndex < originalLines.length || translatedIndex < translatedLines.length)) {
       const originalLine = originalIndex < originalLines.length ? originalLines[originalIndex] : '';
-      const translatedLine =
-        translatedIndex < translatedLines.length ? translatedLines[translatedIndex].trim() : '';
+      const translatedLine = translatedIndex < translatedLines.length ? translatedLines[translatedIndex].trim() : '';
 
-      // console.log(`\nDEBUG-${originalIndex}: ORIGINAL LINE=${originalLine}`);
-      // console.log(`\nDEBUG-${translatedIndex}: TRANSLATED LINE=${translatedLine}`);
+      returnText += '<p class="translated">' + translatedLine + '</p>\n';
 
-      // Check if original line has actual text content (not just HTML tags)
-      const originalHasText = originalLine && originalLine.replace(/<[^>]*>/g, '').trim();
-
-      // Skip HTML declaration and head tags - don't advance counters
-      if (originalLine.includes('<html xmlns') || originalLine.includes('<head')) {
-        result += originalLine + '\n';
-        originalIndex++; // Advance original counter
-        continue; // Skip the rest of this iteration
-      }
-
-      // Only add translated line if original contains <p class AND has text content
-      if (originalLine.includes('<p class=') && originalHasText && translatedLine) {
-        result += '<p class="translated">' + translatedLine + '</p>\n';
-      } else if (translatedLine == '' || translatedLine == null || translatedLine.length <= 5) {
-        // console.log('\nDEBUG: TRANSLATED LINE IS EMPTY');
-      }
-
-      // Always add original line, with italic styling for p class lines
-      if (originalLine) {
-        if (originalLine.includes('<p class=')) {
-          // Add inline italic style to the p tag
-          const italicLine = originalLine.replace(
-            '<p class="',
-            '<p style="font-style: italic;" class="'
-          );
-          result += italicLine.trim() + '\n';
-        } else {
-          result += originalLine + '\n';
-        }
-      }
+      const italicLine = '<p style="font-style: italic;">';
+      returnText += italicLine + originalLine + '</p>\n\n';
 
       translatedIndex++; // Advance translated counter
       originalIndex++; // Advance even if empty
     } // while loop
 
-    return result;
+    return returnText;
   }
 
   /**
@@ -258,7 +274,8 @@ export class TranslationService {
   async translateText(
     text: string,
     targetLang: string,
-    sourceLang: string = 'auto'
+    sourceLang: string = 'auto',
+    useCache: boolean = true
   ): Promise<string> {
     const debugLogs = true;
 
@@ -345,13 +362,9 @@ export class TranslationService {
 
       // Remove webdriver property
       await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(
-          (window as unknown as { navigator: { webdriver?: boolean } }).navigator,
-          'webdriver',
-          {
-            get: () => false,
-          }
-        );
+        Object.defineProperty((window as unknown as { navigator: { webdriver?: boolean } }).navigator, 'webdriver', {
+          get: () => false,
+        });
       });
 
       // Add chrome object
@@ -363,24 +376,16 @@ export class TranslationService {
 
       // Override plugins
       await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(
-          (window as unknown as { navigator: { plugins?: unknown[] } }).navigator,
-          'plugins',
-          {
-            get: () => [1, 2, 3, 4, 5],
-          }
-        );
+        Object.defineProperty((window as unknown as { navigator: { plugins?: unknown[] } }).navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5],
+        });
       });
 
       // Add languages
       await page.evaluateOnNewDocument(() => {
-        Object.defineProperty(
-          (window as unknown as { navigator: { languages?: string[] } }).navigator,
-          'languages',
-          {
-            get: () => ['en-US', 'en'],
-          }
-        );
+        Object.defineProperty((window as unknown as { navigator: { languages?: string[] } }).navigator, 'languages', {
+          get: () => ['en-US', 'en'],
+        });
       });
 
       // Set extra headers
@@ -424,9 +429,7 @@ export class TranslationService {
       // console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
 
       if (!translation) {
-        throw new Error(
-          'Could not extract translation from response - check temp_translated.html for debugging'
-        );
+        throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
       }
 
       // console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
@@ -463,9 +466,7 @@ export class TranslationService {
       return decodedTranslation;
     } catch (error) {
       console.error('\nTranslation error:', error);
-      throw new Error(
-        `Translation failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`
-      );
+      throw new Error(`Translation failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
     } finally {
       if (browser) {
         await browser.close();
@@ -479,9 +480,7 @@ export class TranslationService {
     const htmlContent = document.documentElement.outerHTML;
 
     // Look for non-English translations with better quote handling
-    const dataTextMatches = htmlContent.match(
-      /data-language-name="([^"]+)"[^>]*data-text="([^"]*(?:\\.[^"]*)*)"/g
-    );
+    const dataTextMatches = htmlContent.match(/data-language-name="([^"]+)"[^>]*data-text="([^"]*(?:\\.[^"]*)*)"/g);
     if (!dataTextMatches) {
       console.log('No dataTextMatches found from google page after page loads.');
     } else {
@@ -511,11 +510,8 @@ export class TranslationService {
    * @param sourceLang - Source language code
    * @returns Promise<string> - Path to the new EPUB file
    */
-  async repackageEPUB(
-    originalFilename: string,
-    targetLang: string,
-    sourceLang: string = 'auto'
-  ): Promise<string> {
+  // this appears to translate and stuff as well, maybe break up this method?
+  async repackageEPUB(originalFilename: string, targetLang: string, sourceLang: string = 'auto'): Promise<string> {
     console.log(`📁 Original filename: ${originalFilename}`);
 
     try {
@@ -540,7 +536,7 @@ export class TranslationService {
       }
 
       // STEP 3: Detect EPUB content directory structure
-      console.log('📝 STEP 3: Checking if the extracted EPUB getting directory...');
+      console.log('\n📝 STEP 3: Checking if the extracted EPUB getting directory...');
       const contentDirectory = this.detectEpubContentDirectory(oldEpubDir);
 
       // STEP 4: Find all files in the extracted EPUB
@@ -557,7 +553,15 @@ export class TranslationService {
       let filesToTranslate = fs
         .readdirSync(contentDirectory)
         .filter(f => f.endsWith('.xhtml') || f.endsWith('.html'))
-        .filter(f => f.includes('chapter') || f.includes('ch')); // Only translate chapter files depends on filenames.
+        .filter(f => f.includes('chapter') || f.includes('ch') || f.includes('part'));
+      // Note: Only translate chapter files depends on filenames.
+      // Skip this file: data\old_epub\text\part0000_split_000.html
+      // HACK FIX
+      if (filesToTranslate.includes('part0000_split_000.html')) {
+        filesToTranslate = filesToTranslate.filter(f => f !== 'part0000_split_000.html');
+      }
+      // TODO may need to see if page has any <p text in it at all.
+      // TODO.
       console.log(`📚 Files to translate:`, filesToTranslate);
       if (filesToTranslate.length === 0) {
         console.error('❌ No files to translate found');
@@ -567,33 +571,40 @@ export class TranslationService {
       // DEBUG TESTING - only process one specific file
       // const testFile = 'chapter10.xhtml'; // Set to undefined to process all files
       // const testFile = 'ch01.xhtml'; // Set to undefined to process all files
-      const testFile = ''; // Set to undefined to process all files
+      const testFile = ''; // Set to empty '' to process all files
+      // const testFile = 'Zpart0000_split_002_TEST.html'; // Set to empty '' to process all files
       if (testFile) {
         if (filesToTranslate.includes(testFile)) {
-          console.log(`TEST MODE: Only processing file: ${testFile}`);
+          console.log(`\x1b[35mTEST MODE: Only processing file: ${testFile}\x1b[0m`);
           filesToTranslate = [testFile];
         } else {
           console.log(`Warning: testFile '${testFile}' not found, processing all files`);
         }
       }
 
+      // Break this out into methods properly!
       // Step 5: Begin translating each file from where we left off.
+      let erroredOut = '';
       console.log('\n📝 STEP 5: Begin Translating each file...');
-      for (let i = 0; i < filesToTranslate.length; i++) {
-        const file = filesToTranslate[i];
-        const filePath = path.join(contentDirectory, file);
+      try {
+        for (let i = 0; i < filesToTranslate.length; i++) {
+          const file = filesToTranslate[i];
+          const filePath = path.join(contentDirectory, file);
 
-        console.log(
-          `\nProcessing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`
-        );
-        // console.log(`DEBUG: Translating file: ${filePath}`);
-        await this.translateFile(filePath, targetLang, sourceLang);
+          console.log(`\nProcessing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`);
+          // console.log(`DEBUG: Translating file: ${filePath}`);
+          await this.translateFile(filePath, targetLang, sourceLang);
 
-        // TEMP STOP AFTER chapter 10
-        // if (i >= 10) {
-        //   console.log('TEMP STOP AFTER chapter 10');
-        //   break;
-        // }
+          // TEMP STOP AFTER chapter 10
+          // if (i >= 10) {
+          //   console.log('TEMP STOP AFTER chapter 10');
+          //   break;
+          // }
+        }
+      } catch (error) {
+        // This is an expected error when tralslate service on other side gets too many requests. keep retrying.
+        console.error('Error during file translation loop:', error);
+        erroredOut = `Error during file translation: ${error instanceof Error ? error.message : 'Unknown error'}`;
       }
 
       // Step 6: Create EPUB with proper structure using 7zip.
@@ -601,9 +612,7 @@ export class TranslationService {
 
       console.log('Creating EPUB using 7zip...');
       try {
-        await this.execAsync(
-          `"C:\\Program Files\\7-Zip\\7z.exe" a -tzip "${outputPath}" "${oldEpubDir}\\*" -mx=0`
-        );
+        await this.execAsync(`"C:\\Program Files\\7-Zip\\7z.exe" a -tzip "${outputPath}" "${oldEpubDir}\\*" -mx=0`);
         console.log('Created EPUB using 7zip');
         /* to manually do this two steps: 
         # First add mimetype uncompressed
@@ -614,12 +623,15 @@ export class TranslationService {
         */
       } catch (error) {
         console.error('7zip failed to create EPUB:', error);
-        throw new Error(
-          `Failed to create EPUB with 7zip: ${error instanceof Error ? error.message : 'Unknown error'}`
-        );
+        throw new Error(`Failed to create EPUB with 7zip: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
 
-      console.log(`EPUB repackaged successfully: ${outputPath}`);
+      console.log(`\x1b[32mEPUB repackaged successfully: ${outputPath}\x1b[0m\n\n`);
+
+      // Rethrow error later after epub is rebuilt.
+      if (erroredOut) {
+        throw new Error(erroredOut);
+      }
 
       // CLean up Remove old_epub dir at the end.
       // if (fs.existsSync(oldEpubDir)) {
@@ -631,9 +643,7 @@ export class TranslationService {
       return outputPath;
     } catch (error) {
       console.error('Error in repackage EPUB method:', error);
-      throw new Error(
-        `Failed to repackage EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new Error(`Failed to repackage EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -645,8 +655,8 @@ export class TranslationService {
   private detectEpubContentDirectory(oldEpubDir: string): string {
     // Determine the correct content directory based on EPUB structure
     let contentDirectory: string;
-    const oebpsPath = path.join(oldEpubDir, 'OEBPS');
 
+    const oebpsPath = path.join(oldEpubDir, 'OEBPS');
     if (fs.existsSync(oebpsPath)) {
       // Standard EPUB structure
       const xhtmlPath = path.join(oebpsPath, 'xhtml');
@@ -658,43 +668,29 @@ export class TranslationService {
         contentDirectory = oebpsPath;
         console.log(`📂 Using OEBPS directory directly: ${contentDirectory}`);
       }
+      return contentDirectory;
+    }
+
+    // Check two: text dir stores them.
+    const textPath = path.join(oldEpubDir, 'text');
+    console.log(`🔍 Checking for text directory in EPUB... textPath= ${textPath}`);
+    if (fs.existsSync(textPath)) {
+      // Standard EPUB structure
+      contentDirectory = textPath;
+      console.log(`📂 Using text directory directly: ${contentDirectory}`);
+
+      return contentDirectory;
+    }
+
+    // Alternative EPUB structure - look for HTML files in root or subdirectories
+    console.log('🔍 Using alternative EPUB structure...');
+
+    const detectedDir = this.findContentDir(oldEpubDir);
+    if (detectedDir) {
+      contentDirectory = detectedDir;
+      console.log(`📂 Using alternative EPUB structure: ${contentDirectory}`);
     } else {
-      // Alternative EPUB structure - look for HTML files in root or subdirectories
-      console.log('🔍 Using alternative EPUB structure...');
-      const findContentDir = (dir: string): string | null => {
-        try {
-          const items = fs.readdirSync(dir);
-          const htmlFiles = items.filter(
-            f => f.endsWith('.xhtml') || f.endsWith('.html') || f.endsWith('.htm')
-          );
-
-          if (htmlFiles.length > 0) {
-            console.log(`📚 Found HTML files in: ${dir}`);
-            return dir;
-          }
-
-          // Check subdirectories
-          for (const item of items) {
-            const fullPath = path.join(dir, item);
-            const stat = fs.statSync(fullPath);
-            if (stat.isDirectory()) {
-              const subDirResult = findContentDir(fullPath);
-              if (subDirResult) return subDirResult;
-            }
-          }
-        } catch (error) {
-          console.warn(`⚠️ Could not read directory ${dir}:`, error);
-        }
-        return null;
-      };
-
-      const detectedDir = findContentDir(oldEpubDir);
-      if (detectedDir) {
-        contentDirectory = detectedDir;
-        console.log(`📂 Using alternative EPUB structure: ${contentDirectory}`);
-      } else {
-        throw new Error('No HTML/XHTML files found in EPUB');
-      }
+      throw new Error('No HTML/XHTML files found in EPUB');
     }
 
     return contentDirectory;
@@ -738,9 +734,7 @@ export class TranslationService {
         stdout: (error as { stdout?: string })?.stdout,
         stderr: (error as { stderr?: string })?.stderr,
       });
-      throw new Error(
-        `Failed to extract EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new Error(`Failed to extract EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
@@ -802,5 +796,35 @@ export class TranslationService {
     } catch {
       console.log('No existing cache found, starting fresh');
     }
+  }
+  /**
+   * Recursively finds the first directory containing HTML/XHTML/HTM files
+   * @param dir - Directory to search
+   * @returns string | null - Path to directory containing HTML files, or null if not found
+   */
+  private findContentDir(dir: string): string | null {
+    try {
+      const items = fs.readdirSync(dir);
+      const htmlFiles = items.filter(f => f.endsWith('.xhtml') || f.endsWith('.html') || f.endsWith('.htm'));
+
+      if (htmlFiles.length > 0) {
+        console.log(`📚 Found HTML files in: ${dir}`);
+        return dir;
+      }
+
+      // Check subdirectories
+      for (const item of items) {
+        const fullPath = path.join(dir, item);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          console.log(`🔍 Searching subdirectory: ${fullPath}`);
+          const subDirResult = this.findContentDir(fullPath); // Recursion fun!.
+          if (subDirResult) return subDirResult;
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ Could not read directory ${dir}:`, error);
+    }
+    return null;
   }
 }

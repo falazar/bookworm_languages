@@ -29,17 +29,20 @@ A Node.js TypeScript web application for translating EPUB books to different lan
 ## 🚀 Quick Start
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd bookwork_languages
    ```
 
 2. **Install dependencies**
+
    ```bash
    npm install
    ```
 
 3. **Start development server**
+
    ```bash
    npm run dev
    ```
@@ -47,16 +50,14 @@ A Node.js TypeScript web application for translating EPUB books to different lan
 4. **Open your browser**
    Navigate to `http://localhost:3888`
 
-
-
 ## 🎯 Development Roadmap
 
 See [TODO_LIST.txt](TODO_LIST.txt) for detailed development phases and tasks.
 
-
 ## 🔧 Configuration
 
 ### Environment Variables
+
 Create a `.env` file in the root directory:
 
 ```env
@@ -67,7 +68,9 @@ SUPPORTED_LANGUAGES=en,es,fr,de,it,pt,ru,ja,ko,zh
 ```
 
 ### Supported Languages
+
 The application will support translation to:
+
 - English (en)
 - Spanish (es)
 - French (fr)
@@ -82,10 +85,12 @@ The application will support translation to:
 ## 📝 API Endpoints
 
 ### Current Endpoints
+
 - `GET /` - Home page
 - `GET /hello` - Hello page with dynamic content
 
 ### Planned Endpoints
+
 - `POST /upload` - Upload EPUB file
 - `POST /translate` - Start translation process
 - `GET /download/:id` - Download translated file
@@ -101,6 +106,7 @@ npm test
 ```
 
 For a visual test interface:
+
 ```bash
 npm run test:ui
 ```
@@ -113,6 +119,17 @@ npm run test:ui
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-
-
 This project is designed to be a comprehensive solution for translating EPUB books, making literature more accessible across different languages and cultures.
+
+USAGE: Right now ya gotta do some manual things.
+To start a new translation:
+Delete cache files
+Delete old_epub
+Upload new with html page
+Run translate
+If no files found, check and find proper html files dir in old_epub unzipped dir.
+Manually add dir
+Run translate multiple times, it is slow and will block on server.
+So large delays and retries and cache are setup to complete task.
+After each run, it will create a partially translated final file
+Name \_fr.epub, that you can use.

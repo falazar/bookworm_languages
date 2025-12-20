@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { TranslationService } from './translation-service.js';
+import * as cheerio from 'cheerio';
 
 console.log('🚀 Starting server...');
 
@@ -193,6 +194,55 @@ app.get('/hello', (req, res) => {
     title: 'Hello Page',
     name: req.query.name || 'World',
   });
+});
+
+// Chrome TTS page: speaks HTML paragraphs using speechSynthesis
+app.get('/tts', (req, res) => {
+  try {
+    const baseDir = path.join(__dirname, '../data/old_epub/text');
+    // Default to file 57 if none provided
+    const defaultFile = 'part0000_split_057.html';
+    const fileRel = (req.query.file as string) || defaultFile;
+
+    // Build list of available files in directory
+    const files = fs
+      .readdirSync(baseDir)
+      .filter(f => f.endsWith('.html') || f.endsWith('.xhtml'))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    const resolvedPath = path.normalize(path.join(baseDir, fileRel));
+    // Prevent path traversal outside baseDir
+    if (!resolvedPath.startsWith(baseDir)) {
+      return res.status(400).send('Invalid file path');
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).send('File not found');
+    }
+
+    const rawHtml = fs.readFileSync(resolvedPath, 'utf8');
+    const $ = cheerio.load(rawHtml, { xmlMode: true });
+    const paragraphs = $('p')
+      .map((_, el) => {
+        const text = $(el).text().trim();
+        if (!text) return null;
+        const isTranslated = $(el).hasClass('translated');
+        const lang = isTranslated ? 'fr' : 'en';
+        return { text, lang };
+      })
+      .get()
+      .filter((p: { text: string; lang: string } | null) => p !== null);
+
+    res.render('tts', {
+      title: 'Read Aloud (Chrome Voices)',
+      file: fileRel,
+      paragraphs,
+      files,
+    });
+  } catch (error) {
+    console.error('Error in /tts:', error);
+    res.status(500).send('Internal error preparing TTS page');
+  }
 });
 
 // Test endpoint to verify server is working

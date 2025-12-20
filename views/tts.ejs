@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %></title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 20px; font-size: 17px; }
+      header { display: flex; align-items: baseline; gap: 12px; }
+      .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+      label { display: inline-flex; align-items: center; gap: 6px; }
+      textarea { width: 100%; min-height: 120px; }
+      .para { margin: 8px 0; padding: 6px 8px; border-left: 3px solid #eee; }
+      .para.playing { border-left-color: #0078d4; background: #f5faff; font-weight: 700; }
+      /* Tint by language */
+      .para[data-lang="fr"] { border-left-color: #d83b01; background: #fff7f5; }
+      .para[data-lang="en"] { border-left-color: #107c10; background: #f6fff5; }
+      footer { margin-top: 16px; font-size: 13px; color: #666; }
+      button { padding: 6px 12px; }
+      select, input[type="range"] { min-width: 220px; }
+
+      .legend { display: flex; gap: 18px; align-items: center; margin: 8px 0 12px; font-size: 13px; color: #555; }
+      .swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid #bbb; margin-right: 6px; }
+      .swatch.fr { background: #fff0ea; border-color: #d83b01; }
+      .swatch.en { background: #eef9ee; border-color: #107c10; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Read Aloud</h1>
+      <span>File: <code><%= file %></code></span>
+    </header>
+
+    <div class="legend">
+      <span><span class="swatch fr"></span>French (FR)</span>
+      <span><span class="swatch en"></span>English (EN)</span>
+      <span>Currently playing is highlighted in blue.</span>
+    </div>
+
+    <div class="controls">
+      <label>
+        File
+        <select id="fileSelect"></select>
+      </label>
+      <label>
+        English Voice
+        <select id="voiceSelectEn"></select>
+      </label>
+      <label>
+        French Voice
+        <select id="voiceSelectFr"></select>
+      </label>
+      <label>
+        English Rate
+        <input id="rateEn" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+      </label>
+      <label>
+        French Rate
+        <input id="rateFr" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+      </label>
+      <label>
+        Pitch
+        <input id="pitch" type="range" min="0.8" max="1.2" step="0.05" value="1.0" />
+      </label>
+      <button id="play">Play</button>
+      <button id="pause">Pause</button>
+      <button id="resume">Resume</button>
+      <button id="stop">Stop</button>
+    </div>
+
+    <section id="content">
+      <% paragraphs.forEach(function(p, idx) { %>
+        <div class="para" data-index="<%= idx %>" data-lang="<%= p.lang %>">
+          <span><%= p.text %></span>
+        </div>
+      <% }) %>
+    </section>
+
+    <footer>
+      Tip: Open this page in Chrome/Edge to access high-quality voices. Use the voice list to pick a "Google" voice if available.
+    </footer>
+
+    <script>
+      const fileSelect = document.getElementById('fileSelect');
+      const voiceSelectEn = document.getElementById('voiceSelectEn');
+      const voiceSelectFr = document.getElementById('voiceSelectFr');
+      const rateEn = document.getElementById('rateEn');
+      const rateFr = document.getElementById('rateFr');
+      const pitchInput = document.getElementById('pitch');
+      const btnPlay = document.getElementById('play');
+      const btnPause = document.getElementById('pause');
+      const btnResume = document.getElementById('resume');
+      const btnStop = document.getElementById('stop');
+      const paras = Array.from(document.querySelectorAll('.para'));
+
+      let voices = [];
+      let queue = [];
+      let currentIndex = -1;
+
+      // Populate file selector from server-provided list
+      const files = <%- JSON.stringify(files || []) %>;
+      const currentFile = <%- JSON.stringify(file || '') %>;
+      const paragraphData = <%- JSON.stringify(paragraphs || []) %>;
+
+      // Local storage keys
+      const LS = {
+        file: 'tts.selectedFile',
+        rateEn: 'tts.rateEn',
+        rateFr: 'tts.rateFr',
+      };
+      function loadFiles() {
+        fileSelect.innerHTML = '';
+        files.forEach(f => {
+          const opt = document.createElement('option');
+          opt.value = f;
+          opt.textContent = f;
+          fileSelect.appendChild(opt);
+        });
+        // Prefer stored file if present; else currentFile
+        const storedFile = localStorage.getItem(LS.file);
+        if (storedFile && files.includes(storedFile) && storedFile !== currentFile) {
+          // Navigate to the stored file to restore last session
+          const url = new URL(window.location.href);
+          url.searchParams.set('file', storedFile);
+          window.location.replace(url.toString());
+          return; // stop further init; new page will load
+        }
+        if (currentFile) fileSelect.value = currentFile;
+      }
+
+      function loadVoices() {
+        voices = window.speechSynthesis.getVoices();
+        // Populate English voices
+        voiceSelectEn.innerHTML = '';
+        voices.forEach((v, i) => {
+          const opt = document.createElement('option');
+          opt.value = String(i);
+          opt.textContent = `${v.name} — ${v.lang}${v.default ? ' (default)' : ''}`;
+          voiceSelectEn.appendChild(opt);
+        });
+        // Populate French voices
+        voiceSelectFr.innerHTML = '';
+        voices.forEach((v, i) => {
+          const opt = document.createElement('option');
+          opt.value = String(i);
+          opt.textContent = `${v.name} — ${v.lang}${v.default ? ' (default)' : ''}`;
+          voiceSelectFr.appendChild(opt);
+        });
+
+        // Prefer language-appropriate defaults
+        const defaultEn = voices.findIndex(v => /^en(-|$)/i.test(v.lang));
+        const defaultFr = voices.findIndex(v => /^fr(-|$)/i.test(v.lang));
+        const googleEn = voices.findIndex(v => /^en(-|$)/i.test(v.lang) && /Google/i.test(v.name));
+        const googleFr = voices.findIndex(v => /^fr(-|$)/i.test(v.lang) && /Google/i.test(v.name));
+        voiceSelectEn.value = String(googleEn >= 0 ? googleEn : (defaultEn >= 0 ? defaultEn : 0));
+        voiceSelectFr.value = String(googleFr >= 0 ? googleFr : (defaultFr >= 0 ? defaultFr : 0));
+      }
+
+      // Some browsers populate voices asynchronously
+      loadVoices();
+      loadFiles();
+      if (voices.length === 0) {
+        window.speechSynthesis.onvoiceschanged = () => {
+          loadVoices();
+        };
+      }
+
+      // Restore saved rates
+      const storedRateEn = localStorage.getItem(LS.rateEn);
+      const storedRateFr = localStorage.getItem(LS.rateFr);
+      if (storedRateEn) rateEn.value = String(Math.max(0.5, Math.min(2.0, Number(storedRateEn))));
+      if (storedRateFr) rateFr.value = String(Math.max(0.5, Math.min(2.0, Number(storedRateFr))));
+
+      // On file change, navigate with selected file
+      fileSelect.addEventListener('change', () => {
+        const f = fileSelect.value;
+        // Persist selection
+        localStorage.setItem(LS.file, f);
+        const url = new URL(window.location.href);
+        url.searchParams.set('file', f);
+        window.location.href = url.toString();
+      });
+
+      // Persist rate changes
+      rateEn.addEventListener('input', () => {
+        localStorage.setItem(LS.rateEn, rateEn.value);
+      });
+      rateFr.addEventListener('input', () => {
+        localStorage.setItem(LS.rateFr, rateFr.value);
+      });
+
+      function speakParagraphs(startIdx = 0) {
+        // Use server-provided paragraphData with language hints
+        queue = paragraphData.map((item, idx) => ({ text: String(item.text || ''), lang: String(item.lang || 'en'), idx }));
+        currentIndex = startIdx;
+        speakNext();
+      }
+
+      function markPlaying(idx) {
+        paras.forEach(el => el.classList.remove('playing'));
+        const el = paras[idx];
+        if (el) {
+          el.classList.add('playing');
+          // Scroll the active paragraph to the top of the viewport
+          const header = document.querySelector('header');
+          const headerHeight = header ? header.offsetHeight : 0;
+          const rect = el.getBoundingClientRect();
+          const absoluteTop = rect.top + window.scrollY;
+          const targetTop = Math.max(0, absoluteTop - headerHeight - 12);
+          window.scrollTo({ top: targetTop, behavior: 'smooth' });
+        }
+      }
+
+      function speakNext() {
+        if (currentIndex < 0 || currentIndex >= queue.length) {
+          currentIndex = -1;
+          return;
+        }
+        const item = queue[currentIndex];
+        const u = new SpeechSynthesisUtterance(item.text);
+        // Pick voice by language
+        const vIdx = item.lang === 'fr' ? Number(voiceSelectFr.value) : Number(voiceSelectEn.value);
+        const v = voices[vIdx] || voices.find(v => v.default) || voices[0];
+        if (v) u.voice = v;
+        // Also set lang hint to guide synthesis engine
+        u.lang = item.lang === 'fr' ? 'fr-FR' : 'en-US';
+        // Use per-language rate
+        u.rate = item.lang === 'fr' ? Number(rateFr.value) : Number(rateEn.value);
+        u.pitch = Number(pitchInput.value);
+        u.onstart = () => markPlaying(item.idx);
+        u.onend = () => {
+          currentIndex++;
+          speakNext();
+        };
+        u.onerror = (e) => {
+          console.warn('TTS error:', e.error);
+          currentIndex++;
+          speakNext();
+        };
+        window.speechSynthesis.speak(u);
+      }
+
+      btnPlay.addEventListener('click', () => {
+        window.speechSynthesis.cancel();
+        speakParagraphs(0);
+      });
+      btnPause.addEventListener('click', () => {
+        window.speechSynthesis.pause();
+      });
+      btnResume.addEventListener('click', () => {
+        window.speechSynthesis.resume();
+      });
+      btnStop.addEventListener('click', () => {
+        window.speechSynthesis.cancel();
+        currentIndex = -1;
+        paras.forEach(el => el.classList.remove('playing'));
+      });
+
+      // Click a paragraph to start reading from it
+      const contentEl = document.getElementById('content');
+      contentEl.addEventListener('click', (ev) => {
+        const target = ev.target;
+        const para = (target && target.closest) ? target.closest('.para') : null;
+        if (!para) return;
+        const idx = Number(para.getAttribute('data-index'));
+        // If clicking the currently playing paragraph, toggle pause/resume
+        if (para.classList.contains('playing')) {
+          if (window.speechSynthesis.paused) {
+            // Resume even if 'speaking' is false on some browsers while paused
+            window.speechSynthesis.resume();
+          } else if (window.speechSynthesis.speaking) {
+            window.speechSynthesis.pause();
+          } else {
+            // Not speaking and not paused: start from current paragraph
+            window.speechSynthesis.cancel();
+            speakParagraphs(idx);
+          }
+          return;
+        }
+        // Otherwise start reading from the clicked paragraph
+        window.speechSynthesis.cancel();
+        speakParagraphs(idx);
+      });
+
+      // Spacebar pauses/resumes current utterance (or starts from currentIndex/0)
+      window.addEventListener('keydown', (e) => {
+        const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+        if (!isSpace) return;
+        e.preventDefault();
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+          return;
+        }
+        if (window.speechSynthesis.speaking) {
+          window.speechSynthesis.pause();
+          return;
+        }
+        const startIdx = currentIndex >= 0 ? currentIndex : 0;
+        window.speechSynthesis.cancel();
+        speakParagraphs(startIdx);
+      });
+
+      // Auto-start on load for convenience
+      window.addEventListener('load', () => {
+        // Small delay to allow voices to populate
+        setTimeout(() => speakParagraphs(0), 300);
+      });
+    </script>
+  </body>
+</html>

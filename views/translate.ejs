@@ -147,6 +147,26 @@
         async function performTranslation(sourceLanguage, targetLanguage) {
             const progressFill = document.getElementById('progressFill');
             const statusText = document.getElementById('statusText');
+
+            // Helper to auto-click Translate after 3 minutes
+            function scheduleAutoTranslate() {
+                const btn = document.querySelector('.btn-primary[type="submit"]');
+                if (!btn) return;
+                let secondsLeft = 180;
+                btn.disabled = true;
+                const originalText = btn.textContent;
+                btn.textContent = `Translate (${secondsLeft}s)`;
+                const interval = setInterval(() => {
+                    secondsLeft--;
+                    btn.textContent = `Translate (${secondsLeft}s)`;
+                    if (secondsLeft <= 0) {
+                        clearInterval(interval);
+                        btn.textContent = originalText;
+                        btn.disabled = false;WWWWWWWWWWWWWWWW
+                        btn.click();
+                    }
+                }, 1000);               
+            }
             
             try {
                 // Sample text for testing (in production, this would be extracted from EPUB)
@@ -216,6 +236,7 @@
                 setTimeout(() => {
                     document.getElementById('translationStatus').style.display = 'none';
                     document.getElementById('translateForm').style.display = 'block';
+                    scheduleAutoTranslate();
                 }, 3000);
             }
         }

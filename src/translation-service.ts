@@ -170,7 +170,7 @@ export class TranslationService {
       if (!DEBUG_TESTING) {
         console.log('⏱️ Waiting 160 seconds before processing next file...');
         await new Promise(resolve => setTimeout(resolve, 160000)); // was 125.
-        console.log('✅ Delay complete, continuing to next file...');
+        console.log('✅ Delay complete, continuing to the next file...');
       }
     } catch (error) {
       // console.error(`Error translating file ${filePath}:`, error);
@@ -214,10 +214,15 @@ export class TranslationService {
       // console.log('\n\x1b[33mDEBUG: Skipping cache for testing purposes\x1b[0m');
     }
 
-    const translatedChunk = await this.translateText(textOnly, targetLang, sourceLang, useCache);
+    let translatedChunk = '';
+    const originalLines = textOnly.split('\n\n');
+    if (originalLines.length <= 1) {
+      console.log('WARN: Only one or zero original lines found, skipping translation.');
+    } else {
+      translatedChunk = await this.translateText(textOnly, targetLang, sourceLang, useCache);
+    }
 
     // Then split both original and translated into lines and intersperse them
-    const originalLines = textOnly.split('\n\n');
     const translatedLines = translatedChunk.split('\n\n');
 
     let returnText = '';

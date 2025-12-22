@@ -73,9 +73,14 @@ function getBookList() {
       .map(file => {
         const filePath = path.join(UPLOADS_DIR, file);
         const stats = fs.statSync(filePath);
+        const baseName = path.parse(file).name;
+        const cleanBaseName = baseName.replace(/(_[A-Za-z]{2,3}(?:-[A-Za-z]{2,3})?)+$/i, '');
+        const originalCandidate = path.join(UPLOADS_DIR, `${cleanBaseName}.epub`);
+        const sourceFilename = fs.existsSync(originalCandidate) ? `${cleanBaseName}.epub` : file;
         return {
           filename: file,
           displayName: file, // No timestamp to remove
+          sourceFilename,
           size: stats.size,
           uploadDate: stats.mtime,
           sizeFormatted: formatFileSize(stats.size),
@@ -151,19 +156,13 @@ app.get('/translate/:filename', (req, res) => {
 });
 
 app.post('/translate-book', async (req, res) => {
-  console.log('\n=== TRANSLATION REQUEST RECEIVED ===');
-  console.log('Request body:', req.body);
-
   try {
     const { filename, sourceLanguage, targetLanguage } = req.body;
-    console.log('Extracted parameters:', { filename, sourceLanguage, targetLanguage });
-
     if (!filename || !targetLanguage) {
       console.log('ERROR: Missing required parameters');
       return res.status(400).json({ error: 'Filename and target language are required' });
     }
 
-    console.log('Starting translation service...');
     const translatedText = await translationService.translateBook(
       filename,
       targetLanguage,
@@ -196,12 +195,14 @@ app.get('/hello', (req, res) => {
   });
 });
 
+// todo select a full epub file instead.
 // Chrome TTS page: speaks HTML paragraphs using speechSynthesis
 app.get('/tts', (req, res) => {
   try {
-    const baseDir = path.join(__dirname, '../data/old_epub/text');
+    const baseDir = path.join(__dirname, '../data/old_epub/OEBPS/Text');
     // Default to file 57 if none provided
-    const defaultFile = 'part0000_split_057.html';
+    // const defaultFile = 'part0000_split_057.html';
+    const defaultFile = 'part0012.xhtml';
     const fileRel = (req.query.file as string) || defaultFile;
 
     // Build list of available files in directory

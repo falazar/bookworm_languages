@@ -104,6 +104,37 @@
     <script>
         // Store filename for later use
         const filename = '<%= filename %>';
+
+        // Global helper to auto-click Translate after a delay (uses deadline for accuracy)
+        function scheduleAutoTranslate() {
+            const btn = document.querySelector('.btn-primary[type="submit"]');
+            if (!btn) return;
+            const originalText = btn.textContent;
+            const durationMs = 150000; // 150 seconds
+            const deadline = Date.now() + durationMs;
+            let intervalId;
+
+            const cancelCountdown = () => {
+                if (intervalId) clearInterval(intervalId);
+                btn.textContent = originalText;
+                btn.removeEventListener('click', cancelCountdown);
+            };
+
+            const tick = () => {
+                const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+                btn.textContent = `Translate (${remaining}s)`;
+                if (remaining <= 0) {
+                    clearInterval(intervalId);
+                    btn.textContent = originalText;
+                    btn.click();
+                }
+            };
+
+            // Begin countdown and allow manual click to cancel
+            tick();
+            btn.addEventListener('click', cancelCountdown, { once: true });
+            intervalId = setInterval(tick, 1000);
+        }
         
         // Initialize language preferences from localStorage
         document.addEventListener('DOMContentLoaded', function() {
@@ -125,6 +156,9 @@
             targetSelect.addEventListener('change', function() {
                 localStorage.setItem('lastTargetLanguage', this.value);
             });
+
+            // Start the auto-translate countdown immediately on page load
+            scheduleAutoTranslate();
         });
         
         // Handle translation form submission
@@ -148,25 +182,7 @@
             const progressFill = document.getElementById('progressFill');
             const statusText = document.getElementById('statusText');
 
-            // Helper to auto-click Translate after 3 minutes
-            function scheduleAutoTranslate() {
-                const btn = document.querySelector('.btn-primary[type="submit"]');
-                if (!btn) return;
-                let secondsLeft = 180;
-                btn.disabled = true;
-                const originalText = btn.textContent;
-                btn.textContent = `Translate (${secondsLeft}s)`;
-                const interval = setInterval(() => {
-                    secondsLeft--;
-                    btn.textContent = `Translate (${secondsLeft}s)`;
-                    if (secondsLeft <= 0) {
-                        clearInterval(interval);
-                        btn.textContent = originalText;
-                        btn.disabled = false;WWWWWWWWWWWWWWWW
-                        btn.click();
-                    }
-                }, 1000);               
-            }
+            // Countdown helper moved to top-level; keep usage here
             
             try {
                 // Sample text for testing (in production, this would be extracted from EPUB)

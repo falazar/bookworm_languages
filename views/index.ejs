@@ -36,7 +36,7 @@
             <% if (books && books.length > 0) { %>
                 <div class="books-grid">
                     <% books.forEach(function(book) { %>
-                        <div class="book-card" onclick="window.location.href='/translate/<%= book.filename %>'">
+                        <div class="book-card" onclick="window.location.href='/translate/<%= book.sourceFilename %>'">
                             <div class="book-icon">📖</div>
                             <div class="book-info">
                                 <h3 class="book-title"><%= book.displayName %></h3>

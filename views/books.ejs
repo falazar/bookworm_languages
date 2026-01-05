@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title><%= title %></title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 20px 8%; background: #000; color: #e6e6e6; }
+      h1 { color: #d0d0d0; }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+      .card { background: #0a0a0a; border: 1px solid #333; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 360px; }
+      .cover { width: 100%; height: 220px; object-fit: cover; background: linear-gradient(135deg, #111, #222); }
+      .placeholder { display: flex; align-items: center; justify-content: center; width: 100%; height: 220px; color: #aaa; font-size: 13px; border-bottom: 1px solid #333; }
+      .content { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+      .title { font-weight: 600; color: #f0f0f0; }
+      .meta { font-size: 13px; color: #a0a0a0; }
+      .actions { margin-top: auto; display: flex; gap: 10px; }
+      .btn { padding: 6px 10px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #333; border-radius: 4px; text-decoration: none; }
+      .btn:hover { background: #222; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Books</h1>
+      <p class="meta">Total: <%= Array.isArray(books) ? books.length : 0 %></p>
+    </header>
+
+    <div class="grid">
+      <% (books || []).forEach(function(b) { %>
+        <div class="card">
+          <% if (b.coverDataUrl) { %>
+            <img class="cover" src="<%= b.coverDataUrl %>" alt="Cover for <%= b.displayName %>" />
+          <% } else { %>
+            <div class="placeholder">No cover image</div>
+          <% } %>
+          <div class="content">
+            <div class="title"><%= b.displayName %></div>
+            <div class="meta">Size: <%= b.sizeFormatted %></div>
+            <% if (typeof b.chapterCount !== 'undefined') { %>
+              <div class="meta">Chapters: <%= b.chapterCount %></div>
+            <% } %>
+            <div class="meta">Uploaded: <%= new Date(b.uploadDate).toLocaleString() %></div>
+            <div class="actions">
+              <a class="btn" href="/tts?book=<%= encodeURIComponent(b.filename) %>">Read Aloud</a>
+            </div>
+          </div>
+        </div>
+      <% }) %>
+    </div>
+
+    <footer class="meta">
+      <a href="/">Home</a>
+    </footer>
+  </body>
+</html>

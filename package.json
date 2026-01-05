@@ -43,6 +43,7 @@
     "@types/cheerio": "^0.22.35",
     "@types/multer": "^2.0.0",
     "@types/puppeteer": "^5.4.7",
+    "adm-zip": "^0.5.10",
     "axios": "^1.12.2",
     "cheerio": "^1.1.2",
     "epub2": "^3.0.2",

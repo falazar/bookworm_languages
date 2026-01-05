@@ -5,6 +5,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { TranslationService } from './translation-service.js';
 import * as cheerio from 'cheerio';
+import AdmZip from 'adm-zip';
+import { ReaderService } from './reader-service.js';
 
 console.log('🚀 Starting server...');
 
@@ -15,6 +17,7 @@ const app = express();
 const PORT = process.env.PORT || 3888;
 const UPLOADS_DIR = path.join(__dirname, '../data/uploads');
 const translationService = new TranslationService();
+const readerService = new ReaderService();
 
 // Set EJS as the view engine
 app.set('view engine', 'ejs');
@@ -112,6 +115,21 @@ app.get('/', (req, res) => {
   });
 });
 
+// Simple Books page: lists all uploaded EPUBs
+app.get('/books', (req, res) => {
+  const books = getBookList();
+  const booksWithCounts = books.map(b => {
+    const epubPath = path.join(UPLOADS_DIR, b.filename);
+    const chapterCount = readerService.getChapterCount(epubPath);
+    const coverDataUrl = readerService.getCoverDataUrl(epubPath);
+    return { ...b, chapterCount, coverDataUrl };
+  });
+  res.render('books', {
+    title: 'Books',
+    books: booksWithCounts,
+  });
+});
+
 app.post('/upload', upload.single('epubFile'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
@@ -197,31 +215,39 @@ app.get('/hello', (req, res) => {
 
 // todo select a full epub file instead.
 // Chrome TTS page: speaks HTML paragraphs using speechSynthesis
-app.get('/tts', (req, res) => {
+app.get('/tts', async (req, res) => {
   try {
-    const baseDir = path.join(__dirname, '../data/old_epub/OEBPS/Text');
-    // Default to file 57 if none provided
-    // const defaultFile = 'part0000_split_057.html';
-    const defaultFile = 'part0012.xhtml';
-    const fileRel = (req.query.file as string) || defaultFile;
-
-    // Build list of available files in directory
-    const files = fs
-      .readdirSync(baseDir)
-      .filter(f => f.endsWith('.html') || f.endsWith('.xhtml'))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
-
-    const resolvedPath = path.normalize(path.join(baseDir, fileRel));
-    // Prevent path traversal outside baseDir
-    if (!resolvedPath.startsWith(baseDir)) {
-      return res.status(400).send('Invalid file path');
+    // List uploaded EPUB books
+    const books = getBookList().map(b => b.filename);
+    console.log('[TTS] Found books:', books);
+    if (books.length === 0) {
+      return res.status(200).send('No EPUBs uploaded yet. Please upload a book first.');
     }
 
-    if (!fs.existsSync(resolvedPath)) {
-      return res.status(404).send('File not found');
+    // Selected book and chapter (doc inside EPUB)
+    const selectedBook = (req.query.book as string) || books[0];
+    console.log('[TTS] Selected book:', selectedBook);
+    const uploadsPath = path.join(__dirname, '../data/uploads');
+    const epubPath = path.join(uploadsPath, selectedBook);
+    if (!fs.existsSync(epubPath)) {
+      return res.status(404).send('Selected EPUB not found');
     }
 
-    const rawHtml = fs.readFileSync(resolvedPath, 'utf8');
+    // Parse EPUB chapters via ReaderService
+    const docs = readerService.getChapters(epubPath);
+    const docLabels = readerService.getChapterLabels(epubPath, docs);
+    console.log('[TTS] Chapters (docs) count:', docs.length);
+
+    const selectedDoc = (req.query.doc as string) || docs[0];
+    console.log('[TTS] Selected doc:', selectedDoc);
+    // Read selected doc content from zip
+    const zip = new AdmZip(epubPath);
+    const entries: any[] = zip.getEntries();
+    const docEntry = entries.find((e: any) => e.entryName === selectedDoc);
+    if (!docEntry) {
+      return res.status(404).send('Selected chapter not found in EPUB');
+    }
+    const rawHtml = docEntry.getData().toString('utf8');
     const $ = cheerio.load(rawHtml, { xmlMode: true });
     const paragraphs = $('p')
       .map((_, el) => {
@@ -236,9 +262,14 @@ app.get('/tts', (req, res) => {
 
     res.render('tts', {
       title: 'Read Aloud (Chrome Voices)',
-      file: fileRel,
+      file: selectedDoc,
       paragraphs,
-      files,
+      // New: pass book and docs for selection in UI
+      books,
+      book: selectedBook,
+      docs,
+      docLabels,
+      doc: selectedDoc,
     });
   } catch (error) {
     console.error('Error in /tts:', error);

@@ -7,75 +7,124 @@
     <style>
       /* Dark theme for comfortable reading */
       :root { --base-font: 17px; }
-      body { font-family: system-ui, Arial, sans-serif; margin: 20px; font-size: var(--base-font); background: #000; color: #e6e6e6; }
-      header { display: flex; align-items: baseline; gap: 12px; color: #d0d0d0; }
+      body { font-family: system-ui, Arial, sans-serif; margin: 20px 10%; font-size: var(--base-font); background: #000; color: #e6e6e6; }
+      header { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #d0d0d0; }
+      .header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+      .book-name { max-width: 50vw; }
+      .book-name code { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
       label { display: inline-flex; align-items: center; gap: 6px; }
       textarea { width: 100%; min-height: 120px; background: #0c0c0c; color: #e6e6e6; border: 1px solid #333; }
-      select, input[type="range"] { min-width: 220px; }
-      select { background: #111; color: #e6e6e6; border: 1px solid #333; }
+      input[type="range"] { min-width: 220px; }
+      /* Unified dropdown styling */
+      select {
+        display: inline-block;
+        width: fit-content;
+        min-width: 0;
+        max-width: 60vw;
+        padding: 8px 12px;
+        font-size: 16px;
+        line-height: 1.25;
+        background: #1c1f29;
+        color: #f0f0f0;
+        border: 1px solid #444;
+        border-radius: 6px;
+      }
       input[type="range"] { accent-color: #66a3ff; }
       button { padding: 6px 12px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #333; }
+      .btn { padding: 6px 12px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #333; border-radius: 4px; text-decoration: none; display: inline-block; white-space: nowrap; }
+      .settings-toggle { margin-left: 12px; }
+      .settings-panel { display: none; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
+      .settings-panel.open { display: flex; }
+      
 
       .para { margin: 8px 0; padding: 6px 8px; border-left: 3px solid #222; background: #0a0a0a; }
-      .para.playing { border-left-color: #3898ff; background: #0f1f2a; font-weight: 700; }
+      /* Slight highlight and bold for both FR and EN paragraphs of the active pair */
+      .para.paired { box-shadow: inset 0 0 0 9999px rgba(255, 255, 180, 0.06); font-weight: 700; }
+      /* Stronger emphasis and light yellow text for the paragraph being read */
+      .para.playing { border-left-color: #ffd54f; background: #2a240f; font-weight: 700; color: #ffeaa7; }
+      .para.hidden { display: none; }
       /* Tint by language on dark */
       .para[data-lang="fr"] { border-left-color: #d83b01; background: #1a0f0a; }
       .para[data-lang="en"] { border-left-color: #107c10; background: #0f1a0f; }
 
       footer { margin-top: 16px; font-size: 13px; color: #a0a0a0; }
 
-      .legend { display: flex; gap: 18px; align-items: center; margin: 8px 0 12px; font-size: 13px; color: #a0a0a0; }
+      .legend { display: flex; gap: 18px; align-items: center; margin: 32px 0 12px; font-size: 13px; color: #a0a0a0; }
       .swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid #555; margin-right: 6px; }
       .swatch.fr { background: #1d120d; border-color: #d83b01; }
       .swatch.en { background: #101d10; border-color: #107c10; }
+      .break { flex-basis: 100%; height: 0; }
     </style>
   </head>
   <body>
     <header>
-      <h1>Read Aloud</h1>
-      <span>File: <code><%= file %></code></span>
+      <div class="header-left">
+        <div class="book-name"><code><%= typeof book !== 'undefined' ? book : '' %></code></div>
+      </div>
+      <div>
+        <a href="/books" class="btn">← Back to Books</a>
+      </div>
     </header>
+
+    <div class="controls">
+      <label>
+        Chapter
+        <select id="docSelect"></select>
+      </label>
+      <button id="settingsToggle" class="btn settings-toggle">Settings</button>
+
+      <div id="settingsPanel" class="settings-panel">
+        <label>
+          Show
+          <select id="showLang">
+            <option value="both">Both</option>
+            <option value="en">English only</option>
+            <option value="fr">French only</option>
+          </select>
+        </label>
+        <label style="display:none">
+          Book
+          <select id="bookSelect"></select>
+        </label>
+
+        <label>
+          Font Size
+          <input id="fontSize" type="range" min="15" max="26" step="1" value="17" />
+        </label>
+        <div class="break"></div>
+        <label>
+          English Voice
+          <select id="voiceSelectEn"></select>
+        </label>
+        <label>
+          French Voice
+          <select id="voiceSelectFr"></select>
+        </label>
+        <div class="break"></div>
+        <label>
+          English Rate
+          <input id="rateEn" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+        </label>
+        <label>
+          French Rate
+          <input id="rateFr" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+        </label>
+        <label>
+          Pitch
+          <input id="pitch" type="range" min="0.8" max="1.2" step="0.05" value="1.0" />
+        </label>
+        <button id="play">Play</button>
+        <button id="pause">Pause</button>
+        <button id="resume">Resume</button>
+        <button id="stop">Stop</button>
+      </div>
+    </div>
 
     <div class="legend">
       <span><span class="swatch fr"></span>French (FR)</span>
       <span><span class="swatch en"></span>English (EN)</span>
-      <span>Currently playing is highlighted in blue.</span>
-    </div>
-
-    <div class="controls">
-      <label>
-        File
-        <select id="fileSelect"></select>
-      </label>
-      <label>
-        Font Size
-        <input id="fontSize" type="range" min="15" max="24" step="1" value="17" />
-      </label>
-      <label>
-        English Voice
-        <select id="voiceSelectEn"></select>
-      </label>
-      <label>
-        French Voice
-        <select id="voiceSelectFr"></select>
-      </label>
-      <label>
-        English Rate
-        <input id="rateEn" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
-      </label>
-      <label>
-        French Rate
-        <input id="rateFr" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
-      </label>
-      <label>
-        Pitch
-        <input id="pitch" type="range" min="0.8" max="1.2" step="0.05" value="1.0" />
-      </label>
-      <button id="play">Play</button>
-      <button id="pause">Pause</button>
-      <button id="resume">Resume</button>
-      <button id="stop">Stop</button>
+      <span>Currently playing is highlighted.</span>
     </div>
 
     <section id="content">
@@ -86,58 +135,120 @@
       <% }) %>
     </section>
 
+    <div style="margin-top: 16px;">
+      <button id="nextChapter" class="btn">Next Chapter →</button>
+    </div>
+
     <footer>
       Tip: Open this page in Chrome/Edge to access high-quality voices. Use the voice list to pick a "Google" voice if available.
     </footer>
 
     <script>
-      const fileSelect = document.getElementById('fileSelect');
+      const bookSelect = document.getElementById('bookSelect');
+      const docSelect = document.getElementById('docSelect');
       const voiceSelectEn = document.getElementById('voiceSelectEn');
       const voiceSelectFr = document.getElementById('voiceSelectFr');
       const rateEn = document.getElementById('rateEn');
       const rateFr = document.getElementById('rateFr');
       const pitchInput = document.getElementById('pitch');
       const fontSizeInput = document.getElementById('fontSize');
+      const showLangSelect = document.getElementById('showLang');
+      const settingsToggleBtn = document.getElementById('settingsToggle');
+      const settingsPanel = document.getElementById('settingsPanel');
       const btnPlay = document.getElementById('play');
       const btnPause = document.getElementById('pause');
       const btnResume = document.getElementById('resume');
       const btnStop = document.getElementById('stop');
       const paras = Array.from(document.querySelectorAll('.para'));
+      const nextChapterBtn = document.getElementById('nextChapter');
 
       let voices = [];
       let queue = [];
       let currentIndex = -1;
+      // Track current FR/EN pair anchor index to stabilize scrolling
+      let lastPairAnchor = -1;
 
-      // Populate file selector from server-provided list
-      const files = <%- JSON.stringify(files || []) %>;
-      const currentFile = <%- JSON.stringify(file || '') %>;
+      // Keep screen awake while reading using the Screen Wake Lock API
+      let wakeLock = null;
+      async function requestWakeLock() {
+        try {
+          if (navigator.wakeLock && !wakeLock) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            wakeLock.addEventListener('release', () => { wakeLock = null; });
+          }
+        } catch (err) {
+          console.warn('Wake Lock error:', err);
+          wakeLock = null;
+        }
+      }
+      async function releaseWakeLock() {
+        try {
+          if (wakeLock) {
+            await wakeLock.release();
+            wakeLock = null;
+          }
+        } catch (_) {}
+      }
+      // Reacquire on visibility change (wake locks can be released when tab is hidden)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible' && (window.speechSynthesis.speaking || window.speechSynthesis.paused)) {
+          requestWakeLock();
+        }
+      });
+
+      // Populate book/chapter selectors from server-provided list
+      const books = <%- JSON.stringify(typeof books !== 'undefined' ? books : []) %>;
+      const currentBook = <%- JSON.stringify(typeof book !== 'undefined' ? book : '') %>;
+      const docs = <%- JSON.stringify(typeof docs !== 'undefined' ? docs : []) %>;
+      const docLabels = <%- JSON.stringify(typeof docLabels !== 'undefined' ? docLabels : []) %>;
+      const currentDoc = <%- JSON.stringify(typeof doc !== 'undefined' ? doc : '') %>;
       const paragraphData = <%- JSON.stringify(paragraphs || []) %>;
 
       // Local storage keys
       const LS = {
-        file: 'tts.selectedFile',
+        book: 'tts.selectedBook',
+        doc: 'tts.selectedDoc',
         rateEn: 'tts.rateEn',
         rateFr: 'tts.rateFr',
         fontSize: 'tts.fontSize',
+        showLang: 'tts.showLang',
       };
-      function loadFiles() {
-        fileSelect.innerHTML = '';
-        files.forEach(f => {
+      function loadBooks() {
+        bookSelect.innerHTML = '';
+        books.forEach(b => {
           const opt = document.createElement('option');
-          opt.value = f;
-          opt.textContent = f;
-          fileSelect.appendChild(opt);
+          opt.value = b;
+          opt.textContent = b;
+          bookSelect.appendChild(opt);
         });
-        // Prefer stored file if present; else currentFile
-        const storedFile = localStorage.getItem(LS.file);
-        if (storedFile && files.includes(storedFile) && storedFile !== currentFile) {
-          // Navigate to the stored file to restore last session
+        const storedBook = localStorage.getItem(LS.book);
+        const chosenBook = storedBook && books.includes(storedBook) ? storedBook : currentBook;
+        if (chosenBook) {
+          bookSelect.value = chosenBook;
+        } else if (books.length > 0) {
+          // No saved or current book; default to first and navigate to load chapters
+          bookSelect.value = books[0];
           const url = new URL(window.location.href);
-          url.searchParams.set('file', storedFile);
+          url.searchParams.set('book', books[0]);
+          url.searchParams.delete('doc');
           window.location.replace(url.toString());
-          return; // stop further init; new page will load
+          return;
         }
-        if (currentFile) fileSelect.value = currentFile;
+      }
+
+      function loadDocs() {
+        docSelect.innerHTML = '';
+        docs.forEach((d, idx) => {
+          const opt = document.createElement('option');
+          opt.value = d;
+          let label = (Array.isArray(docLabels) && docLabels[idx]) ? String(docLabels[idx]) : String(d);
+          if (label.length > 30) label = label.slice(0, 27) + '…';
+          opt.textContent = label;
+          docSelect.appendChild(opt);
+        });
+        const storedDoc = localStorage.getItem(LS.doc);
+        const chosenDoc = storedDoc && docs.includes(storedDoc) ? storedDoc : currentDoc;
+        if (chosenDoc) docSelect.value = chosenDoc;
       }
 
       function loadVoices() {
@@ -170,7 +281,9 @@
 
       // Some browsers populate voices asynchronously
       loadVoices();
-      loadFiles();
+      loadBooks();
+      loadDocs();
+      updateNextChapterButton();
       if (voices.length === 0) {
         window.speechSynthesis.onvoiceschanged = () => {
           loadVoices();
@@ -185,17 +298,46 @@
 
       // Restore font size
       const storedFont = localStorage.getItem(LS.fontSize);
-      const initialFont = storedFont ? Math.max(15, Math.min(24, Number(storedFont))) : 17;
+      const initialFont = storedFont ? Math.max(15, Math.min(26, Number(storedFont))) : 17;
       fontSizeInput.value = String(initialFont);
       document.documentElement.style.setProperty('--base-font', initialFont + 'px');
 
-      // On file change, navigate with selected file
-      fileSelect.addEventListener('change', () => {
-        const f = fileSelect.value;
-        // Persist selection
-        localStorage.setItem(LS.file, f);
+      // On book change, navigate to first chapter
+      bookSelect.addEventListener('change', () => {
+        const b = bookSelect.value;
+        localStorage.setItem(LS.book, b);
         const url = new URL(window.location.href);
-        url.searchParams.set('file', f);
+        url.searchParams.set('book', b);
+        url.searchParams.delete('doc');
+        window.location.href = url.toString();
+      });
+      // On chapter change, navigate within book
+      docSelect.addEventListener('change', () => {
+        const d = docSelect.value;
+        localStorage.setItem(LS.doc, d);
+        const url = new URL(window.location.href);
+        url.searchParams.set('book', bookSelect.value || currentBook);
+        url.searchParams.set('doc', d);
+        window.location.href = url.toString();
+      });
+
+      function updateNextChapterButton() {
+        const current = docSelect.value || currentDoc;
+        const idx = docs.indexOf(current);
+        const hasNext = idx >= 0 && idx < docs.length - 1;
+        nextChapterBtn.style.display = hasNext ? 'inline-block' : 'none';
+      }
+      docSelect.addEventListener('change', updateNextChapterButton);
+      bookSelect && bookSelect.addEventListener('change', updateNextChapterButton);
+
+      nextChapterBtn.addEventListener('click', () => {
+        const current = docSelect.value || currentDoc;
+        const idx = docs.indexOf(current);
+        if (idx < 0 || idx >= docs.length - 1) return;
+        const nextDoc = docs[idx + 1];
+        const url = new URL(window.location.href);
+        url.searchParams.set('book', bookSelect.value || currentBook);
+        url.searchParams.set('doc', nextDoc);
         window.location.href = url.toString();
       });
 
@@ -209,42 +351,106 @@
 
       // Persist font size changes
       fontSizeInput.addEventListener('input', () => {
-        const size = Math.max(15, Math.min(24, Number(fontSizeInput.value)));
+        const size = Math.max(15, Math.min(26, Number(fontSizeInput.value)));
         document.documentElement.style.setProperty('--base-font', size + 'px');
         localStorage.setItem(LS.fontSize, String(size));
       });
 
+      // Settings panel toggle (persisted in localStorage)
+      const LS_SETTINGS = 'tts.settingsOpen';
+      const settingsOpenStored = localStorage.getItem(LS_SETTINGS);
+      const isOpen = settingsOpenStored === '1';
+      if (isOpen) settingsPanel.classList.add('open');
+      settingsToggleBtn.addEventListener('click', () => {
+        settingsPanel.classList.toggle('open');
+        localStorage.setItem(LS_SETTINGS, settingsPanel.classList.contains('open') ? '1' : '0');
+      });
+
+      function applyLanguageFilter() {
+        const val = showLangSelect.value || 'both';
+        paras.forEach(el => {
+          const lang = el.getAttribute('data-lang');
+          const hide = (val === 'en' && lang === 'fr') || (val === 'fr' && lang === 'en');
+          if (hide) el.classList.add('hidden'); else el.classList.remove('hidden');
+        });
+      }
+
+      // Restore language visibility preference
+      const storedShow = localStorage.getItem(LS.showLang);
+      showLangSelect.value = storedShow || 'both';
+      applyLanguageFilter();
+
+      // Change visibility and reset playback when filter changes
+      showLangSelect.addEventListener('change', () => {
+        localStorage.setItem(LS.showLang, showLangSelect.value);
+        applyLanguageFilter();
+        window.speechSynthesis.cancel();
+        currentIndex = -1;
+        paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
+      });
+
       function speakParagraphs(startIdx = 0) {
-        // Use server-provided paragraphData with language hints
-        queue = paragraphData.map((item, idx) => ({ text: String(item.text || ''), lang: String(item.lang || 'en'), idx }));
-        currentIndex = startIdx;
+        // Build queue from server-provided paragraphData with language hints and current visibility filter
+        const val = showLangSelect.value || 'both';
+        let items = paragraphData.map((item, idx) => ({ text: String(item.text || ''), lang: String(item.lang || 'en'), idx }));
+        if (val === 'en') items = items.filter(it => it.lang === 'en');
+        else if (val === 'fr') items = items.filter(it => it.lang === 'fr');
+        queue = items;
+        // Map DOM index to position in filtered queue
+        let startPos = queue.findIndex(it => it.idx === startIdx);
+        if (startPos < 0) startPos = 0;
+        currentIndex = startPos;
+        lastPairAnchor = -1;
+        requestWakeLock();
         speakNext();
       }
 
       function markPlaying(idx) {
-        paras.forEach(el => el.classList.remove('playing'));
+        // Clear previous highlights
+        paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
         const el = paras[idx];
         if (el) {
-          el.classList.add('playing');
-          // Scroll the active paragraph to the top of the viewport
-          const header = document.querySelector('header');
-          const headerHeight = header ? header.offsetHeight : 0;
-          const rect = el.getBoundingClientRect();
-          const absoluteTop = rect.top + window.scrollY;
-          const targetTop = Math.max(0, absoluteTop - headerHeight - 12);
-          window.scrollTo({ top: targetTop, behavior: 'smooth' });
-        }
-      }
+          // Determine paired paragraph (neighbor with opposite language)
+          const current = paragraphData[idx];
+          const currentLang = current && current.lang;
+          let pairIdx = -1;
+          if (currentLang === 'fr') {
+            if (idx > 0 && paragraphData[idx - 1].lang === 'en') pairIdx = idx - 1; else if (idx + 1 < paragraphData.length && paragraphData[idx + 1].lang === 'en') pairIdx = idx + 1;
+          } else if (currentLang === 'en') {
+            if (idx > 0 && paragraphData[idx - 1].lang === 'fr') pairIdx = idx - 1; else if (idx + 1 < paragraphData.length && paragraphData[idx + 1].lang === 'fr') pairIdx = idx + 1;
+          }
 
-      // Schedule advancing to the next utterance to avoid recursive synchronous calls
-      function scheduleNext() {
-        setTimeout(() => speakNext(), 0);
+          // Apply highlights: slight background on both, stronger highlight + yellow text on current
+          el.classList.add('paired');
+          el.classList.add('playing');
+          if (pairIdx >= 0 && paras[pairIdx]) paras[pairIdx].classList.add('paired');
+
+          // Only adjust scroll when entering a NEW FR/EN pair
+          const anchor = pairIdx >= 0 ? Math.min(idx, pairIdx) : idx;
+          const isNewPair = anchor !== lastPairAnchor;
+          if (isNewPair) {
+            // Scroll the PREVIOUS VISIBLE paragraph to the top (fallback to current if none)
+            let prevIdx = idx - 1;
+            while (prevIdx >= 0 && paras[prevIdx] && paras[prevIdx].classList.contains('hidden')) prevIdx--;
+            const scrollEl = prevIdx >= 0 ? paras[prevIdx] : el;
+            if (scrollEl) {
+              const header = document.querySelector('header');
+              const headerHeight = header ? header.offsetHeight : 0;
+              const rect = scrollEl.getBoundingClientRect();
+              const absoluteTop = rect.top + window.scrollY;
+              const targetTop = Math.max(0, absoluteTop - headerHeight - 12);
+              window.scrollTo({ top: targetTop, behavior: 'smooth' });
+            }
+            lastPairAnchor = anchor;
+          }
+        }
       }
 
       function speakNext() {
         if (currentIndex < 0 || currentIndex >= queue.length) {
-          paras.forEach(el => el.classList.remove('playing'));
-          currentIndex = -1;
+          currentIndex = 1000;
+          paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
+          lastPairAnchor = -1;
           return; // stop at end; do not restart
         }
         const item = queue[currentIndex];
@@ -262,40 +468,47 @@
         u.onend = () => {
           if (currentIndex + 1 >= queue.length) {
             // Finished last paragraph; clear playing state and stop
-            paras.forEach(el => el.classList.remove('playing'));
-            currentIndex = -1;
+            paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
+            currentIndex = 1000;
+            lastPairAnchor = -1;
+            releaseWakeLock();
             return;
           }
           currentIndex++;
-          scheduleNext();
+          speakNext();
         };
         u.onerror = (e) => {
           console.warn('TTS error:', e.error);
           if (currentIndex + 1 >= queue.length) {
-            paras.forEach(el => el.classList.remove('playing'));
+            paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
             currentIndex = -1;
+            lastPairAnchor = -1;
             return;
           }
           currentIndex++;
-          scheduleNext();
+          speakNext();
         };
         window.speechSynthesis.speak(u);
       }
 
       btnPlay.addEventListener('click', () => {
         window.speechSynthesis.cancel();
+        requestWakeLock();
         speakParagraphs(0);
       });
       btnPause.addEventListener('click', () => {
         window.speechSynthesis.pause();
       });
       btnResume.addEventListener('click', () => {
+        requestWakeLock();
         window.speechSynthesis.resume();
       });
       btnStop.addEventListener('click', () => {
         window.speechSynthesis.cancel();
         currentIndex = -1;
-        paras.forEach(el => el.classList.remove('playing'));
+        paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
+        lastPairAnchor = -1;
+        releaseWakeLock();
       });
 
       // Click a paragraph to start reading from it
@@ -321,6 +534,7 @@
         }
         // Otherwise start reading from the clicked paragraph
         window.speechSynthesis.cancel();
+        requestWakeLock();
         speakParagraphs(idx);
       });
 
@@ -343,9 +557,16 @@
 
       // Auto-start on load for convenience
       window.addEventListener('load', () => {
-        // Small delay to allow voices to populate
-        setTimeout(() => speakParagraphs(0), 300);
+        // On mobile, avoid auto-start so wake lock can be requested from a user gesture
+        const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+        if (!isMobile) {
+          // Small delay to allow voices to populate
+          setTimeout(() => speakParagraphs(0), 300);
+        }
       });
+
+      // Clean up wake lock on unload
+      window.addEventListener('beforeunload', () => { releaseWakeLock(); });
     </script>
   </body>
 </html>

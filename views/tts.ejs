@@ -360,7 +360,7 @@
         nextChapterBtn.style.display = hasNext ? 'inline-block' : 'none';
       }
       docSelect.addEventListener('change', updateNextChapterButton);
-      bookSelect && bookSelect.addEventListener('change', updateNextChapterButton);
+      // Book change triggers navigation; next-chapter button will update on the new page
 
       nextChapterBtn.addEventListener('click', () => {
         const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
@@ -481,7 +481,7 @@
 
       function speakNext() {
         if (currentIndex < 0 || currentIndex >= queue.length) {
-          currentIndex = 1000;
+          currentIndex = -1;
           paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
           lastPairAnchor = -1;
           return; // stop at end; do not restart
@@ -504,7 +504,7 @@
           if (currentIndex + 1 >= queue.length) {
             // Finished last paragraph; clear playing state and stop
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
-            currentIndex = 1000;
+            currentIndex = -1;
             lastPairAnchor = -1;
             releaseWakeLock();
             return;
@@ -629,18 +629,34 @@
         speakParagraphs(idx);
       }, { passive: false });
 
-      // Spacebar pauses/resumes current utterance (or starts from currentIndex/0)
+      // Keyboard: suppress Tab navigation; Space toggles pause/resume (robust resume)
       window.addEventListener('keydown', (e) => {
-        const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
-        if (!isSpace) return;
-        e.preventDefault();
-        // Resume if paused; pause if speaking; do nothing if idle (avoid restarting from top)
-        if (window.speechSynthesis.paused) {
-          window.speechSynthesis.resume();
+        // Always suppress Tab so it doesn't move focus
+        if (e.key === 'Tab' || e.code === 'Tab') {
+          if (DEBUG_TTS) console.log('[TTS] Tab suppressed');
+          e.preventDefault();
+          e.stopPropagation();
           return;
         }
-        if (window.speechSynthesis.speaking) {
-          window.speechSynthesis.pause();
+        const isSpace = e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar';
+        if (!isSpace) return;
+        const tag = (document.activeElement && document.activeElement.tagName) || '';
+        if (/^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(tag)) return; // don't hijack space in controls
+        e.preventDefault();
+        const s = window.speechSynthesis;
+        // Resume if paused (or flagged paused), otherwise pause if speaking
+        if (s.paused || userPaused) {
+          if (DEBUG_TTS) console.log(`[TTS] action: resume (space) paused=${s.paused} userPaused=${userPaused}`);
+          userPaused = false;
+          requestWakeLock();
+          const curIdx = (currentIndex >= 0 && currentIndex < queue.length) ? (queue[currentIndex]?.idx ?? 0) : 0;
+          resumeOrRestart(curIdx);
+          return;
+        }
+        if (s.speaking) {
+          if (DEBUG_TTS) console.log('[TTS] action: pause (space)');
+          userPaused = true;
+          s.pause();
           return;
         }
         // If idle, do nothing; user can click a paragraph or press Play to start

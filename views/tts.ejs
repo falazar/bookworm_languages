@@ -134,7 +134,6 @@
         </div>
       <% }) %>
     </section>
-
     <div style="margin-top: 16px;">
       <button id="nextChapter" class="btn">Next Chapter →</button>
     </div>
@@ -147,7 +146,6 @@
       const bookSelect = document.getElementById('bookSelect');
       const docSelect = document.getElementById('docSelect');
       const voiceSelectEn = document.getElementById('voiceSelectEn');
-      const voiceSelectFr = document.getElementById('voiceSelectFr');
       const rateEn = document.getElementById('rateEn');
       const rateFr = document.getElementById('rateFr');
       const pitchInput = document.getElementById('pitch');
@@ -162,11 +160,23 @@
       const paras = Array.from(document.querySelectorAll('.para'));
       const nextChapterBtn = document.getElementById('nextChapter');
 
+      // Debug logging flag (enable via ?debug=1)
+      const DEBUG_TTS = /[?&]debug=1/.test(location.search);
+      function logState(prefix) {
+        try {
+          const s = window.speechSynthesis;
+          if (DEBUG_TTS) console.log(`[TTS] ${prefix} | speaking=${s.speaking} paused=${s.paused} pending=${s.pending}`);
+        } catch (_) {}
+      }
+
       let voices = [];
       let queue = [];
       let currentIndex = -1;
+      let userPaused = false;
       // Track current FR/EN pair anchor index to stabilize scrolling
       let lastPairAnchor = -1;
+      // Suppress synthetic click after touch to avoid double-handling
+      let lastTouchTs = 0;
 
       // Keep screen awake while reading using the Screen Wake Lock API
       let wakeLock = null;
@@ -189,6 +199,28 @@
           }
         } catch (_) {}
       }
+
+      // Try resume, fallback to restart if engine stays paused or idle
+      function resumeOrRestart(idx) {
+        logState('resumeOrRestart: before resume');
+        try { requestWakeLock(); } catch(_) {}
+        try { window.speechSynthesis.resume(); } catch(_) {}
+        setTimeout(() => {
+          try {
+            const s = window.speechSynthesis;
+            // If still paused OR not speaking and no pending utterances, restart from the same paragraph
+            if (s.paused || (!s.speaking && !s.pending)) {
+              logState('resumeOrRestart: fallback restart');
+              s.cancel();
+              requestWakeLock();
+              speakParagraphs(idx);
+            } else {
+              logState('resumeOrRestart: resume took effect');
+            }
+          } catch(_) {}
+        }, 180);
+      }
+
       // Reacquire on visibility change (wake locks can be released when tab is hidden)
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && (window.speechSynthesis.speaking || window.speechSynthesis.paused)) {
@@ -213,6 +245,7 @@
         fontSize: 'tts.fontSize',
         showLang: 'tts.showLang',
       };
+
       function loadBooks() {
         bookSelect.innerHTML = '';
         books.forEach(b => {
@@ -400,6 +433,7 @@
         if (startPos < 0) startPos = 0;
         currentIndex = startPos;
         lastPairAnchor = -1;
+        if (DEBUG_TTS) console.log(`[TTS] speakParagraphs startIdx=${startIdx} filter=${val} queueLen=${queue.length} startPos=${startPos}`);
         requestWakeLock();
         speakNext();
       }
@@ -453,6 +487,7 @@
           return; // stop at end; do not restart
         }
         const item = queue[currentIndex];
+        if (DEBUG_TTS) console.log(`[TTS] speakNext currentIndex=${currentIndex}/${queue.length} lang=${item.lang} idx=${item.idx} textLen=${item.text?.length || 0}`);
         const u = new SpeechSynthesisUtterance(item.text);
         // Pick voice by language
         const vIdx = item.lang === 'fr' ? Number(voiceSelectFr.value) : Number(voiceSelectEn.value);
@@ -463,8 +498,9 @@
         // Use per-language rate
         u.rate = item.lang === 'fr' ? Number(rateFr.value) : Number(rateEn.value);
         u.pitch = Number(pitchInput.value);
-        u.onstart = () => markPlaying(item.idx);
+        u.onstart = () => { if (DEBUG_TTS) console.log(`[TTS] onstart idx=${item.idx} lang=${item.lang}`); userPaused = false; markPlaying(item.idx); };
         u.onend = () => {
+          if (DEBUG_TTS) console.log(`[TTS] onend idx=${item.idx}`);
           if (currentIndex + 1 >= queue.length) {
             // Finished last paragraph; clear playing state and stop
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
@@ -477,7 +513,7 @@
           speakNext();
         };
         u.onerror = (e) => {
-          console.warn('TTS error:', e.error);
+          console.warn('[TTS] error:', e.error);
           if (currentIndex + 1 >= queue.length) {
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
             currentIndex = -1;
@@ -496,10 +532,14 @@
         speakParagraphs(0);
       });
       btnPause.addEventListener('click', () => {
+        if (DEBUG_TTS) console.log('[TTS] button pause');
+        userPaused = true;
         window.speechSynthesis.pause();
       });
       btnResume.addEventListener('click', () => {
+        if (DEBUG_TTS) console.log('[TTS] button resume');
         requestWakeLock();
+        userPaused = false;
         window.speechSynthesis.resume();
       });
       btnStop.addEventListener('click', () => {
@@ -513,29 +553,81 @@
       // Click a paragraph to start reading from it
       const contentEl = document.getElementById('content');
       contentEl.addEventListener('click', (ev) => {
+        // Ignore synthetic clicks that immediately follow a touch
+        if (Date.now() - lastTouchTs < 400) return;
         const target = ev.target;
         const para = (target && target.closest) ? target.closest('.para') : null;
         if (!para) return;
         const idx = Number(para.getAttribute('data-index'));
+        if (DEBUG_TTS) console.log(`[TTS] click paragraph idx=${idx} playing=${para.classList.contains('playing')}`);
         // If clicking the currently playing paragraph, toggle pause/resume
         if (para.classList.contains('playing')) {
-          if (window.speechSynthesis.paused) {
-            // Resume even if 'speaking' is false on some browsers while paused
-            window.speechSynthesis.resume();
-          } else if (window.speechSynthesis.speaking) {
-            window.speechSynthesis.pause();
+          const s = window.speechSynthesis;
+          const shouldResume = s.paused || userPaused;
+          if (shouldResume) {
+            if (DEBUG_TTS) console.log(`[TTS] action: resume (click current) paused=${s.paused} userPaused=${userPaused}`);
+            userPaused = false;
+            resumeOrRestart(idx);
+          } else if (s.speaking) {
+            if (DEBUG_TTS) console.log('[TTS] action: pause (click current)');
+            userPaused = true;
+            s.pause();
           } else {
-            // Not speaking and not paused: start from current paragraph
-            window.speechSynthesis.cancel();
+            if (DEBUG_TTS) console.log('[TTS] action: restart (click current idle)');
+            s.cancel();
+            requestWakeLock();
             speakParagraphs(idx);
           }
           return;
         }
-        // Otherwise start reading from the clicked paragraph
+        // Otherwise restart from the clicked paragraph
+        if (DEBUG_TTS) console.log('[TTS] action: restart (click other)');
         window.speechSynthesis.cancel();
         requestWakeLock();
         speakParagraphs(idx);
       });
+
+      // Touch to start from the tapped paragraph (mobile)
+      contentEl.addEventListener('touchend', (ev) => {
+        lastTouchTs = Date.now();
+        try { if (ev.preventDefault) ev.preventDefault(); } catch(_) {}
+        try { if (ev.stopPropagation) ev.stopPropagation(); } catch(_) {}
+        const target = ev.target;
+        const para = (target && target.closest) ? target.closest('.para') : null;
+        if (!para) return;
+        const idx = Number(para.getAttribute('data-index'));
+        if (DEBUG_TTS) {
+          try {
+            const s = window.speechSynthesis;
+            console.log(`[TTS] touch paragraph idx=${idx} playing=${para.classList.contains('playing')} speaking=${s.speaking} paused=${s.paused} pending=${s.pending}`);
+          } catch(_) {}
+        }
+        // If tapping the currently playing paragraph, toggle pause/resume
+        if (para.classList.contains('playing')) {
+          const s = window.speechSynthesis;
+          const shouldResume = s.paused || userPaused;
+          if (shouldResume) {
+            if (DEBUG_TTS) console.log(`[TTS] action: resume (touch current) paused=${s.paused} userPaused=${userPaused}`);
+            userPaused = false;
+            resumeOrRestart(idx);
+          } else if (s.speaking) {
+            if (DEBUG_TTS) console.log('[TTS] action: pause (touch current)');
+            userPaused = true;
+            s.pause();
+          } else {
+            if (DEBUG_TTS) console.log('[TTS] action: restart (touch current idle)');
+            s.cancel();
+            requestWakeLock();
+            speakParagraphs(idx);
+          }
+          return;
+        }
+        // Otherwise restart from the tapped paragraph
+        if (DEBUG_TTS) console.log('[TTS] action: restart (touch other)');
+        window.speechSynthesis.cancel();
+        requestWakeLock();
+        speakParagraphs(idx);
+      }, { passive: false });
 
       // Spacebar pauses/resumes current utterance (or starts from currentIndex/0)
       window.addEventListener('keydown', (e) => {

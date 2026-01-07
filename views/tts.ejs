@@ -322,8 +322,7 @@
       });
 
       function updateNextChapterButton() {
-        const current = docSelect.value || currentDoc;
-        const idx = docs.indexOf(current);
+        const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
         const hasNext = idx >= 0 && idx < docs.length - 1;
         nextChapterBtn.style.display = hasNext ? 'inline-block' : 'none';
       }
@@ -331,10 +330,10 @@
       bookSelect && bookSelect.addEventListener('change', updateNextChapterButton);
 
       nextChapterBtn.addEventListener('click', () => {
-        const current = docSelect.value || currentDoc;
-        const idx = docs.indexOf(current);
+        const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
         if (idx < 0 || idx >= docs.length - 1) return;
         const nextDoc = docs[idx + 1];
+        localStorage.setItem(LS.doc, nextDoc);
         const url = new URL(window.location.href);
         url.searchParams.set('book', bookSelect.value || currentBook);
         url.searchParams.set('doc', nextDoc);

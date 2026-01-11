@@ -481,7 +481,7 @@
 
       function speakNext() {
         if (currentIndex < 0 || currentIndex >= queue.length) {
-          currentIndex = -1;
+          currentIndex = 1000;
           paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
           lastPairAnchor = -1;
           return; // stop at end; do not restart
@@ -504,7 +504,7 @@
           if (currentIndex + 1 >= queue.length) {
             // Finished last paragraph; clear playing state and stop
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
-            currentIndex = -1;
+            currentIndex = 1000;
             lastPairAnchor = -1;
             releaseWakeLock();
             return;
@@ -516,7 +516,7 @@
           console.warn('[TTS] error:', e.error);
           if (currentIndex + 1 >= queue.length) {
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
-            currentIndex = -1;
+            currentIndex = 1000;
             lastPairAnchor = -1;
             return;
           }

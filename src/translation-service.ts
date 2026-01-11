@@ -562,7 +562,9 @@ export class TranslationService {
           const file = filesToTranslate[i];
           const filePath = path.join(contentDirectory, file);
 
-          console.log(`Processing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toISOString()}`);
+          console.log(
+            `Processing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toLocaleTimeString([], { hour12: false })}`
+          );
           const skipOrNew = await this.translateFile(filePath, targetLang, sourceLang);
         }
       } catch (error) {
@@ -769,6 +771,10 @@ export class TranslationService {
 
     // Save to file cache
     const cacheFile = path.join(this.cacheDir, `${cacheKey}.txt`);
+    // Ensure cache directory exists (defensive check in case constructor didn't run)
+    if (!fs.existsSync(this.cacheDir)) {
+      fs.mkdirSync(this.cacheDir, { recursive: true });
+    }
     fs.writeFileSync(cacheFile, translation, 'utf8');
   }
 

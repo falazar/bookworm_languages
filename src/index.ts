@@ -238,14 +238,23 @@ app.get('/tts', async (req, res) => {
     const docLabels = readerService.getChapterLabels(epubPath, docs);
     console.log('[TTS] Chapters (docs) count:', docs.length);
 
-    const selectedDoc = (req.query.doc as string) || docs[0];
+    let selectedDoc = (req.query.doc as string) || docs[6];
+    // remove ./ in front
+    selectedDoc = selectedDoc.replace(/^\.\//, '');
     console.log('[TTS] Selected doc:', selectedDoc);
+
     // Read selected doc content from zip
     const zip = new AdmZip(epubPath);
     const entries: any[] = zip.getEntries();
-    const docEntry = entries.find((e: any) => e.entryName === selectedDoc);
+    console.log(
+      '[TTS] EPUB entries:',
+      entries.map(e => e.entryName)
+    );
+
+    let docEntry = entries.find((e: any) => e.entryName === selectedDoc);
     if (!docEntry) {
-      return res.status(404).send('Selected chapter not found in EPUB');
+      console.log('[TTS] Selected doc entry not found in EPUB:', selectedDoc);
+      return res.status(404).send('Selected document not found in EPUB');
     }
     const rawHtml = docEntry.getData().toString('utf8');
     const $ = cheerio.load(rawHtml, { xmlMode: true });

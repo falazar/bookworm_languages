@@ -588,46 +588,46 @@
       });
 
       // Touch to start from the tapped paragraph (mobile)
-      contentEl.addEventListener('touchend', (ev) => {
-        lastTouchTs = Date.now();
-        try { if (ev.preventDefault) ev.preventDefault(); } catch(_) {}
-        try { if (ev.stopPropagation) ev.stopPropagation(); } catch(_) {}
-        const target = ev.target;
-        const para = (target && target.closest) ? target.closest('.para') : null;
-        if (!para) return;
-        const idx = Number(para.getAttribute('data-index'));
-        if (DEBUG_TTS) {
-          try {
-            const s = window.speechSynthesis;
-            console.log(`[TTS] touch paragraph idx=${idx} playing=${para.classList.contains('playing')} speaking=${s.speaking} paused=${s.paused} pending=${s.pending}`);
-          } catch(_) {}
-        }
-        // If tapping the currently playing paragraph, toggle pause/resume
-        if (para.classList.contains('playing')) {
-          const s = window.speechSynthesis;
-          const shouldResume = s.paused || userPaused;
-          if (shouldResume) {
-            if (DEBUG_TTS) console.log(`[TTS] action: resume (touch current) paused=${s.paused} userPaused=${userPaused}`);
-            userPaused = false;
-            resumeOrRestart(idx);
-          } else if (s.speaking) {
-            if (DEBUG_TTS) console.log('[TTS] action: pause (touch current)');
-            userPaused = true;
-            s.pause();
-          } else {
-            if (DEBUG_TTS) console.log('[TTS] action: restart (touch current idle)');
-            s.cancel();
-            requestWakeLock();
-            speakParagraphs(idx);
-          }
-          return;
-        }
-        // Otherwise restart from the tapped paragraph
-        if (DEBUG_TTS) console.log('[TTS] action: restart (touch other)');
-        window.speechSynthesis.cancel();
-        requestWakeLock();
-        speakParagraphs(idx);
-      }, { passive: false });
+      // contentEl.addEventListener('touchend', (ev) => {
+      //   lastTouchTs = Date.now();
+      //   try { if (ev.preventDefault) ev.preventDefault(); } catch(_) {}
+      //   try { if (ev.stopPropagation) ev.stopPropagation(); } catch(_) {}
+      //   const target = ev.target;
+      //   const para = (target && target.closest) ? target.closest('.para') : null;
+      //   if (!para) return;
+      //   const idx = Number(para.getAttribute('data-index'));
+      //   if (DEBUG_TTS) {
+      //     try {
+      //       const s = window.speechSynthesis;
+      //       console.log(`[TTS] touch paragraph idx=${idx} playing=${para.classList.contains('playing')} speaking=${s.speaking} paused=${s.paused} pending=${s.pending}`);
+      //     } catch(_) {}
+      //   }
+      //   // If tapping the currently playing paragraph, toggle pause/resume
+      //   if (para.classList.contains('playing')) {
+      //     const s = window.speechSynthesis;
+      //     const shouldResume = s.paused || userPaused;
+      //     if (shouldResume) {
+      //       if (DEBUG_TTS) console.log(`[TTS] action: resume (touch current) paused=${s.paused} userPaused=${userPaused}`);
+      //       userPaused = false;
+      //       resumeOrRestart(idx);
+      //     } else if (s.speaking) {
+      //       if (DEBUG_TTS) console.log('[TTS] action: pause (touch current)');
+      //       userPaused = true;
+      //       s.pause();
+      //     } else {
+      //       if (DEBUG_TTS) console.log('[TTS] action: restart (touch current idle)');
+      //       s.cancel();
+      //       requestWakeLock();
+      //       speakParagraphs(idx);
+      //     }
+      //     return;
+      //   }
+      //   // Otherwise restart from the tapped paragraph
+      //   if (DEBUG_TTS) console.log('[TTS] action: restart (touch other)');
+      //   window.speechSynthesis.cancel();
+      //   requestWakeLock();
+      //   speakParagraphs(idx);
+      // }, { passive: false });
 
       // Keyboard: suppress Tab navigation; Space toggles pause/resume (robust resume)
       window.addEventListener('keydown', (e) => {

@@ -274,7 +274,17 @@
         docs.forEach((d, idx) => {
           const opt = document.createElement('option');
           opt.value = d;
-          let label = (Array.isArray(docLabels) && docLabels[idx]) ? String(docLabels[idx]) : String(d);
+          // For Flashback book, use filename instead of title since all titles are the same
+          const isFlashback = currentBook && currentBook.toLowerCase().includes('flashback');
+          let label;
+          if (isFlashback) {
+            // Strip directory path and parse filename like "OEBPS/chapter001.html" -> "Chapter 1"
+            const filename = String(d).split('/').pop().split('\\').pop();
+            const match = filename.match(/chapter(\d+)/i);
+            label = match ? `Chapter ${parseInt(match[1], 10)}` : filename;
+          } else {
+            label = (Array.isArray(docLabels) && docLabels[idx]) ? String(docLabels[idx]) : String(d);
+          }
           if (label.length > 30) label = label.slice(0, 27) + '…';
           opt.textContent = label;
           docSelect.appendChild(opt);

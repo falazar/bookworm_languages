@@ -219,7 +219,7 @@ app.get('/tts', async (req, res) => {
   try {
     // List uploaded EPUB books
     const books = getBookList().map(b => b.filename);
-    console.log('[TTS] Found books:', books);
+    // console.log('[TTS] Found books:', books);
     if (books.length === 0) {
       return res.status(200).send('No EPUBs uploaded yet. Please upload a book first.');
     }
@@ -246,10 +246,10 @@ app.get('/tts', async (req, res) => {
     // Read selected doc content from zip
     const zip = new AdmZip(epubPath);
     const entries: any[] = zip.getEntries();
-    console.log(
-      '[TTS] EPUB entries:',
-      entries.map(e => e.entryName)
-    );
+    // console.log(
+    //   '[TTS] EPUB entries:',
+    //   entries.map(e => e.entryName)
+    // );
 
     let docEntry = entries.find((e: any) => e.entryName === selectedDoc);
     if (!docEntry) {

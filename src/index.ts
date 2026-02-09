@@ -107,7 +107,13 @@ function formatFileSize(bytes: number): string {
 }
 
 // Helper functions for progress
-function loadProgress(): Record<string, Record<string, number>> {
+// New simplified structure: { "book.epub": { lastDoc: "chapter.html", paragraphIndex: 5 } }
+interface BookProgress {
+  lastDoc: string;
+  paragraphIndex: number;
+}
+
+function loadProgress(): Record<string, BookProgress> {
   try {
     if (fs.existsSync(PROGRESS_FILE)) {
       const data = fs.readFileSync(PROGRESS_FILE, 'utf8');
@@ -119,7 +125,7 @@ function loadProgress(): Record<string, Record<string, number>> {
   return {};
 }
 
-function saveProgress(progress: Record<string, Record<string, number>>): void {
+function saveProgress(progress: Record<string, BookProgress>): void {
   try {
     fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
   } catch (error) {
@@ -235,7 +241,6 @@ app.get('/hello', (req, res) => {
   });
 });
 
-// todo select a full epub file instead.
 // Chrome TTS page: speaks HTML paragraphs using speechSynthesis
 app.get('/tts', async (req, res) => {
   try {
@@ -246,50 +251,27 @@ app.get('/tts', async (req, res) => {
       return res.status(200).send('No EPUBs uploaded yet. Please upload a book first.');
     }
 
-    // Selected book and chapter (doc inside EPUB)
-    const selectedBook = (req.query.book as string) || books[0];
-    console.log('[TTS] Selected book:', selectedBook);
-    const uploadsPath = path.join(__dirname, '../data/uploads');
-    const epubPath = path.join(uploadsPath, selectedBook);
-    if (!fs.existsSync(epubPath)) {
-      return res.status(404).send('Selected EPUB not found');
-    }
+    // Validate and get book path
+    const { selectedBook, epubPath } = validateAndGetBookPath(req.query.book as string | undefined, books);
 
     // Parse EPUB chapters via ReaderService
     const docs = readerService.getChapters(epubPath);
     const docLabels = readerService.getChapterLabels(epubPath, docs);
     console.log('[TTS] Chapters (docs) count:', docs.length);
+    console.log('[TTS] Available docs:', docs.slice(0, 10)); // Log first 10 chapters
 
-    let selectedDoc = (req.query.doc as string) || docs[6];
-    // remove ./ in front
-    selectedDoc = selectedDoc.replace(/^\.\//, '');
-    console.log('[TTS] Selected doc:', selectedDoc);
+    // Determine which document and paragraph to start from (validates and normalizes)
+    const { selectedDoc, paragraphIndex: savedParagraphIndex } = getBookPosition(
+      selectedBook,
+      docs,
+      req.query.doc as string | undefined
+    );
 
-    // Read selected doc content from zip
-    const zip = new AdmZip(epubPath);
-    const entries: any[] = zip.getEntries();
-    // console.log(
-    //   '[TTS] EPUB entries:',
-    //   entries.map(e => e.entryName)
-    // );
+    console.log('[TTS] Final selected doc:', selectedDoc);
+    console.log('[TTS] Selected doc index in docs array:', docs.indexOf(selectedDoc));
 
-    let docEntry = entries.find((e: any) => e.entryName === selectedDoc);
-    if (!docEntry) {
-      console.log('[TTS] Selected doc entry not found in EPUB:', selectedDoc);
-      return res.status(404).send('Selected document not found in EPUB');
-    }
-    const rawHtml = docEntry.getData().toString('utf8');
-    const $ = cheerio.load(rawHtml, { xmlMode: true });
-    const paragraphs = $('p')
-      .map((_, el) => {
-        const text = $(el).text().trim();
-        if (!text) return null;
-        const isTranslated = $(el).hasClass('translated');
-        const lang = isTranslated ? 'fr' : 'en';
-        return { text, lang };
-      })
-      .get()
-      .filter((p: { text: string; lang: string } | null) => p !== null);
+    // Extract paragraphs from the selected document
+    const paragraphs = extractParagraphsFromDoc(epubPath, selectedDoc);
 
     res.render('tts', {
       title: 'Read Aloud (Chrome Voices)',
@@ -301,8 +283,8 @@ app.get('/tts', async (req, res) => {
       docs,
       docLabels,
       doc: selectedDoc,
-      // Load saved progress
-      savedParagraphIndex: loadProgress()[selectedBook]?.[selectedDoc] || 0,
+      // Use paragraph index determined earlier
+      savedParagraphIndex,
     });
   } catch (error) {
     console.error('Error in /tts:', error);
@@ -310,28 +292,177 @@ app.get('/tts', async (req, res) => {
   }
 });
 
+/**
+ * Validates book selection and returns the safe file path
+ * @param requestedBook - Book filename from query parameter (optional)
+ * @param availableBooks - List of available book filenames
+ * @returns Object with selectedBook name and epubPath
+ */
+function validateAndGetBookPath(
+  requestedBook: string | undefined,
+  availableBooks: string[]
+): { selectedBook: string; epubPath: string } {
+  // Select book from query or use first available
+  const selectedBook = requestedBook || availableBooks[0];
+
+  // Validate book filename to prevent path traversal
+  if (!isSafeFilename(selectedBook)) {
+    console.warn('[TTS] SECURITY: Invalid book filename rejected:', selectedBook);
+    throw new Error('Invalid book filename');
+  }
+
+  // Verify book exists in our list (whitelist check)
+  if (!availableBooks.includes(selectedBook)) {
+    console.warn('[TTS] SECURITY: Book not in whitelist:', selectedBook);
+    throw new Error('Book not in whitelist');
+  }
+
+  console.log('[TTS] Selected book:', selectedBook);
+  const uploadsPath = path.join(__dirname, '../data/uploads');
+  const epubPath = path.join(uploadsPath, selectedBook);
+
+  // Double-check resolved path is within uploads directory
+  const resolvedPath = path.resolve(epubPath);
+  const resolvedUploads = path.resolve(uploadsPath);
+  if (!resolvedPath.startsWith(resolvedUploads)) {
+    console.error('[TTS] SECURITY: Path traversal attempt detected');
+    throw new Error('Path traversal attempt detected');
+  }
+
+  // Verify file exists
+  if (!fs.existsSync(epubPath)) {
+    throw new Error('EPUB file not found');
+  }
+
+  return { selectedBook, epubPath };
+}
+
+/**
+ * Determines which document and paragraph to start reading from
+ * @param selectedBook - The book filename
+ * @param docs - Array of available documents in the book
+ * @param queryDoc - Optional doc parameter from query string
+ * @returns Object with selectedDoc path and paragraph index to start from
+ */
+function getBookPosition(
+  selectedBook: string,
+  docs: string[],
+  queryDoc?: string
+): { selectedDoc: string; paragraphIndex: number } {
+  const progress = loadProgress();
+  const bookProgress = progress[selectedBook];
+  console.log('[TTS] Saved progress for this book:', JSON.stringify(bookProgress, null, 2));
+
+  let selectedDoc: string;
+  let paragraphIndex = 0;
+
+  if (!queryDoc) {
+    // No doc specified in query - use saved progress or first chapter
+    if (bookProgress?.lastDoc) {
+      selectedDoc = bookProgress.lastDoc;
+      paragraphIndex = bookProgress.paragraphIndex || 0;
+      console.log(`[TTS] Resuming last read: ${selectedDoc} at paragraph ${paragraphIndex}`);
+    } else {
+      selectedDoc = docs[0];
+      console.log(`[TTS] No saved progress, starting at first chapter: ${docs[0]}`);
+    }
+  } else {
+    // Doc was specified in query
+    selectedDoc = queryDoc;
+    console.log(`[TTS] Doc specified in query: ${selectedDoc}`);
+    if (bookProgress?.lastDoc === selectedDoc) {
+      paragraphIndex = bookProgress.paragraphIndex || 0;
+      console.log(`[TTS] Resuming at paragraph ${paragraphIndex}`);
+    } else {
+      console.log(`[TTS] Different doc than saved, starting at paragraph 0`);
+    }
+  }
+
+  // Validate doc path to prevent path traversal
+  if (!isSafeDocPath(selectedDoc)) {
+    console.warn('[TTS] SECURITY: Invalid doc path rejected:', selectedDoc);
+    throw new Error('Invalid document path');
+  }
+
+  // Normalize: remove ./ in front
+  selectedDoc = selectedDoc.replace(/^\.\//g, '');
+
+  // Verify doc exists in EPUB's chapter list (whitelist check)
+  if (!docs.includes(selectedDoc)) {
+    console.warn('[TTS] SECURITY: Doc not in EPUB chapter list:', selectedDoc);
+    throw new Error('Selected document not found in EPUB');
+  }
+
+  return { selectedDoc, paragraphIndex };
+}
+
+/**
+ * Extracts paragraphs from a document in an EPUB file
+ * @param epubPath - Path to the EPUB file
+ * @param selectedDoc - Document path within the EPUB
+ * @returns Array of paragraph objects with text and language
+ */
+function extractParagraphsFromDoc(epubPath: string, selectedDoc: string): Array<{ text: string; lang: string }> {
+  const zip = new AdmZip(epubPath);
+  const entries = zip.getEntries();
+
+  const docEntry = entries.find((e: any) => e.entryName === selectedDoc);
+  if (!docEntry) {
+    console.log('[TTS] Selected doc entry not found in EPUB:', selectedDoc);
+    throw new Error('Selected document not found in EPUB');
+  }
+
+  const rawHtml = docEntry.getData().toString('utf8');
+  const $ = cheerio.load(rawHtml, { xmlMode: true });
+
+  const paragraphs = $('p')
+    .map((_, el) => {
+      const text = $(el).text().trim();
+      if (!text) return null;
+      const isTranslated = $(el).hasClass('translated');
+      const lang = isTranslated ? 'fr' : 'en';
+      return { text, lang };
+    })
+    .get()
+    .filter((p: { text: string; lang: string } | null) => p !== null);
+
+  return paragraphs as Array<{ text: string; lang: string }>;
+}
+
 // Progress routes
 app.get('/get-progress', (req, res) => {
-  const { book, doc } = req.query;
-  if (!book || !doc) {
-    return res.status(400).json({ error: 'Book and doc parameters required' });
+  const { book } = req.query;
+  if (!book) {
+    return res.status(400).json({ error: 'Book parameter required' });
   }
   const progress = loadProgress();
-  const paragraphIndex = progress[book as string]?.[doc as string] || 0;
-  console.log('[SERVER] Loaded progress:', { book, doc, paragraphIndex });
-  res.json({ paragraphIndex });
+  const bookProgress = progress[book as string];
+  console.log('[SERVER] Loaded progress:', bookProgress);
+  res.json(bookProgress || { lastDoc: null, paragraphIndex: 0 });
 });
 
 app.post('/save-progress', (req, res) => {
   const { book, doc, paragraphIndex } = req.body;
+  console.log('[SERVER] /save-progress request received:', { book, doc, paragraphIndex });
+
   if (!book || !doc || typeof paragraphIndex !== 'number') {
+    console.error('[SERVER] Invalid save-progress request - missing parameters');
     return res.status(400).json({ error: 'Book, doc, and paragraphIndex required' });
   }
+
   console.log('[SERVER] Saving progress:', { book, doc, paragraphIndex });
   const progress = loadProgress();
-  if (!progress[book]) progress[book] = {};
-  progress[book][doc] = paragraphIndex;
+  console.log('[SERVER] Current progress before save:', JSON.stringify(progress, null, 2));
+
+  // Store only the last read chapter per book
+  progress[book] = {
+    lastDoc: doc,
+    paragraphIndex: paragraphIndex,
+  };
+
   saveProgress(progress);
+  console.log('[SERVER] Progress saved successfully, new state:', JSON.stringify(progress[book], null, 2));
+
   res.json({ success: true });
 });
 
@@ -345,7 +476,42 @@ app.get('/test', (req, res) => {
   });
 });
 
+// ============================================================================
+// Security Helper Functions
+// ============================================================================
+
+// Security: Input validation to prevent path traversal attacks
+// This protects against directory traversal vulnerabilities
+function isSafeFilename(filename: string): boolean {
+  if (!filename || typeof filename !== 'string') return false;
+  // Reject path traversal patterns (../, ..\, ..%2F, etc.)
+  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) return false;
+  // Reject absolute paths
+  if (filename.startsWith('/') || /^[a-zA-Z]:/.test(filename)) return false;
+  // Only allow alphanumeric, dash, underscore, dot (for extensions)
+  if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return false;
+  // Reject hidden files and special names
+  if (filename.startsWith('.') || filename === '.' || filename === '..') return false;
+  return true;
+}
+
+function isSafeDocPath(docPath: string): boolean {
+  if (!docPath || typeof docPath !== 'string') return false;
+  // Remove leading ./ if present (common in EPUB paths)
+  const normalized = docPath.replace(/^\.\//, '');
+  // Reject path traversal patterns
+  if (normalized.includes('..')) return false;
+  // Must not start with / or \ (no absolute paths)
+  if (normalized.startsWith('/') || normalized.startsWith('\\')) return false;
+  // Only allow forward slashes, alphanumeric, dash, underscore, dot
+  if (!/^[a-zA-Z0-9._\/-]+$/.test(normalized)) return false;
+  return true;
+}
+
+// ============================================================================
 // Start server
+// ============================================================================
+
 const server = app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

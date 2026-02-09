@@ -155,10 +155,8 @@ function isLocalStorageAvailable() {
 }
 const localStorageAvailable = isLocalStorageAvailable();
 
-// Local storage keys
+// Local storage keys (UI preferences only - position tracking is server-side)
 const LS = {
-  book: 'tts.selectedBook',
-  doc: 'tts.selectedDoc',
   rateEn: 'tts.rateEn',
   rateFr: 'tts.rateFr',
   fontSize: 'tts.fontSize',
@@ -193,18 +191,11 @@ function loadBooks() {
     opt.textContent = b;
     bookSelect.appendChild(opt);
   });
-  let storedBook;
-  console.log('[TTS] About to get storedBook from localStorage');
-  try {
-    if (localStorageAvailable) storedBook = localStorage.getItem(LS.book);
-  } catch (e) {
-    console.warn('[TTS] localStorage error (book):', e);
-  }
-  const chosenBook = storedBook && books.includes(storedBook) ? storedBook : currentBook;
-  if (chosenBook) {
-    bookSelect.value = chosenBook;
+  // Use server-provided currentBook
+  if (currentBook) {
+    bookSelect.value = currentBook;
   } else if (books.length > 0) {
-    // No saved or current book; default to first and navigate to load chapters
+    // No current book; default to first and navigate to load chapters
     bookSelect.value = books[0];
     const url = new URL(window.location.href);
     url.searchParams.set('book', books[0]);
@@ -235,15 +226,8 @@ function loadDocs() {
     opt.textContent = label;
     docSelect.appendChild(opt);
   });
-  let storedDoc;
-  console.log('[TTS] About to get storedDoc from localStorage');
-  try {
-    if (localStorageAvailable) storedDoc = localStorage.getItem(LS.doc);
-  } catch (e) {
-    console.warn('[TTS] localStorage error (doc):', e);
-  }
-  const chosenDoc = storedDoc && docs.includes(storedDoc) ? storedDoc : currentDoc;
-  if (chosenDoc) docSelect.value = chosenDoc;
+  // Use server-provided currentDoc (from progress system)
+  if (currentDoc) docSelect.value = currentDoc;
 }
 
 function loadVoices() {
@@ -320,11 +304,6 @@ try {
 // On book change, navigate to first chapter
 bookSelect.addEventListener('change', () => {
   const b = bookSelect.value;
-  try {
-    if (localStorageAvailable) localStorage.setItem(LS.book, b);
-  } catch (e) {
-    console.warn('[TTS] localStorage set error (book):', e);
-  }
   const url = new URL(window.location.href);
   url.searchParams.set('book', b);
   url.searchParams.delete('doc');
@@ -333,11 +312,6 @@ bookSelect.addEventListener('change', () => {
 // On chapter change, navigate within book
 docSelect.addEventListener('change', () => {
   const d = docSelect.value;
-  try {
-    if (localStorageAvailable) localStorage.setItem(LS.doc, d);
-  } catch (e) {
-    console.warn('[TTS] localStorage set error (doc):', e);
-  }
   const url = new URL(window.location.href);
   url.searchParams.set('book', bookSelect.value || currentBook);
   url.searchParams.set('doc', d);
@@ -372,11 +346,6 @@ nextChapterBtn.addEventListener('click', () => {
   const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
   if (idx < 0 || idx >= docs.length - 1) return;
   const nextDoc = docs[idx + 1];
-  try {
-    if (localStorageAvailable) localStorage.setItem(LS.doc, nextDoc);
-  } catch (e) {
-    console.warn('[TTS] localStorage set error (nextDoc):', e);
-  }
   const url = new URL(window.location.href);
   url.searchParams.set('book', bookSelect.value || currentBook);
   url.searchParams.set('doc', nextDoc);

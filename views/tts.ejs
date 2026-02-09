@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -237,6 +238,21 @@
       const docLabels = <%- JSON.stringify(typeof docLabels !== 'undefined' ? docLabels : []) %>;
       const currentDoc = <%- JSON.stringify(typeof doc !== 'undefined' ? doc : '') %>;
       const paragraphData = <%- JSON.stringify(paragraphs || []) %>;
+      const savedParagraphIndex = <%- JSON.stringify(typeof savedParagraphIndex !== 'undefined' ? savedParagraphIndex : 0) %>;
+
+      // Check if localStorage is available
+      function isLocalStorageAvailable() {
+        try {
+          const test = '__localStorage_test__';
+          localStorage.setItem(test, test);
+          localStorage.removeItem(test);
+          return true;
+        } catch (e) {
+          console.warn('[TTS] localStorage not available:', e);
+          return false;
+        }
+      }
+      const localStorageAvailable = isLocalStorageAvailable();
 
       // Local storage keys
       const LS = {
@@ -248,6 +264,23 @@
         showLang: 'tts.showLang',
       };
 
+      function saveProgressToServer(paragraphIndex) {
+        console.log('[TTS] Saving progress to server:', { book: currentBook, doc: currentDoc, paragraphIndex });
+        fetch('/save-progress', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            book: currentBook,
+            doc: currentDoc,
+            paragraphIndex: paragraphIndex
+          })
+        }).then(() => {
+          console.log('[TTS] Progress saved successfully');
+        }).catch(err => {
+          console.warn('[TTS] Failed to save progress:', err);
+        });
+      }
+
       function loadBooks() {
         bookSelect.innerHTML = '';
         books.forEach(b => {
@@ -257,7 +290,7 @@
           bookSelect.appendChild(opt);
         });
         let storedBook;
-        try { storedBook = localStorage.getItem(LS.book); } catch(e) {}
+        try { if (localStorageAvailable) storedBook = localStorage.getItem(LS.book); } catch(e) { console.warn('[TTS] localStorage error (book):', e); }
         const chosenBook = storedBook && books.includes(storedBook) ? storedBook : currentBook;
         if (chosenBook) {
           bookSelect.value = chosenBook;
@@ -293,7 +326,7 @@
           docSelect.appendChild(opt);
         });
         let storedDoc;
-        try { storedDoc = localStorage.getItem(LS.doc); } catch(e) {}
+        try { if (localStorageAvailable) storedDoc = localStorage.getItem(LS.doc); } catch(e) { console.warn('[TTS] localStorage error (doc):', e); }
         const chosenDoc = storedDoc && docs.includes(storedDoc) ? storedDoc : currentDoc;
         if (chosenDoc) docSelect.value = chosenDoc;
       }
@@ -349,15 +382,17 @@
       // Restore saved rates
       let storedRateEn, storedRateFr, storedFont, storedShow;
       try {
-        storedRateEn = localStorage.getItem(LS.rateEn);
-        storedRateFr = localStorage.getItem(LS.rateFr);
+        if (localStorageAvailable) {
+          storedRateEn = localStorage.getItem(LS.rateEn);
+          storedRateFr = localStorage.getItem(LS.rateFr);
+        }
         if (storedRateEn) rateEn.value = String(Math.max(0.5, Math.min(2.0, Number(storedRateEn))));
         if (storedRateFr) rateFr.value = String(Math.max(0.5, Math.min(2.0, Number(storedRateFr))));
       } catch (e) { console.warn('[TTS] localStorage access error (rates):', e); }
 
       // Restore font size
       try {
-        storedFont = localStorage.getItem(LS.fontSize);
+        if (localStorageAvailable) storedFont = localStorage.getItem(LS.fontSize);
         const initialFont = storedFont ? Math.max(15, Math.min(26, Number(storedFont))) : 17;
         fontSizeInput.value = String(initialFont);
         document.documentElement.style.setProperty('--base-font', initialFont + 'px');
@@ -366,7 +401,7 @@
       // On book change, navigate to first chapter
       bookSelect.addEventListener('change', () => {
         const b = bookSelect.value;
-        try { localStorage.setItem(LS.book, b); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS.book, b); } catch(e) { console.warn('[TTS] localStorage set error (book):', e); }
         const url = new URL(window.location.href);
         url.searchParams.set('book', b);
         url.searchParams.delete('doc');
@@ -375,7 +410,10 @@
       // On chapter change, navigate within book
       docSelect.addEventListener('change', () => {
         const d = docSelect.value;
-        try { localStorage.setItem(LS.doc, d); } catch(e) {}
+        // Save progress for current chapter before changing
+        /// ahh we just need per book dont need this todo
+        saveProgressToServer(currentPlayingIdx >= 0 ? currentPlayingIdx : 0);
+        try { if (localStorageAvailable) localStorage.setItem(LS.doc, d); } catch(e) { console.warn('[TTS] localStorage set error (doc):', e); }
         const url = new URL(window.location.href);
         url.searchParams.set('book', bookSelect.value || currentBook);
         url.searchParams.set('doc', d);
@@ -410,7 +448,9 @@
         const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
         if (idx < 0 || idx >= docs.length - 1) return;
         const nextDoc = docs[idx + 1];
-        try { localStorage.setItem(LS.doc, nextDoc); } catch(e) {}
+        // Save progress for current chapter
+        saveProgressToServer(currentPlayingIdx >= 0 ? currentPlayingIdx : 0);
+        try { if (localStorageAvailable) localStorage.setItem(LS.doc, nextDoc); } catch(e) { console.warn('[TTS] localStorage set error (nextDoc):', e); }
         const url = new URL(window.location.href);
         url.searchParams.set('book', bookSelect.value || currentBook);
         url.searchParams.set('doc', nextDoc);
@@ -419,28 +459,28 @@
 
       // Persist rate changes
       rateEn.addEventListener('input', () => {
-        try { localStorage.setItem(LS.rateEn, rateEn.value); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS.rateEn, rateEn.value); } catch(e) { console.warn('[TTS] localStorage set error (rateEn):', e); }
       });
       rateFr.addEventListener('input', () => {
-        try { localStorage.setItem(LS.rateFr, rateFr.value); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS.rateFr, rateFr.value); } catch(e) { console.warn('[TTS] localStorage set error (rateFr):', e); }
       });
 
       // Persist font size changes
       fontSizeInput.addEventListener('input', () => {
         const size = Math.max(15, Math.min(26, Number(fontSizeInput.value)));
         document.documentElement.style.setProperty('--base-font', size + 'px');
-        try { localStorage.setItem(LS.fontSize, String(size)); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS.fontSize, String(size)); } catch(e) { console.warn('[TTS] localStorage set error (fontSize):', e); }
       });
 
       // Settings panel toggle (persisted in localStorage)
       const LS_SETTINGS = 'tts.settingsOpen';
       let settingsOpenStored;
-      try { settingsOpenStored = localStorage.getItem(LS_SETTINGS); } catch(e) {}
+      try { if (localStorageAvailable) settingsOpenStored = localStorage.getItem(LS_SETTINGS); } catch(e) { console.warn('[TTS] localStorage get error (settings):', e); }
       const isOpen = settingsOpenStored === '1';
       if (isOpen) settingsPanel.classList.add('open');
       settingsToggleBtn.addEventListener('click', () => {
         settingsPanel.classList.toggle('open');
-        try { localStorage.setItem(LS_SETTINGS, settingsPanel.classList.contains('open') ? '1' : '0'); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS_SETTINGS, settingsPanel.classList.contains('open') ? '1' : '0'); } catch(e) { console.warn('[TTS] localStorage set error (settings):', e); }
       });
 
       function applyLanguageFilter() {
@@ -454,14 +494,15 @@
 
       // Restore language visibility preference
       try {
-        const storedShow = localStorage.getItem(LS.showLang);
+        let storedShow;
+        if (localStorageAvailable) storedShow = localStorage.getItem(LS.showLang);
         showLangSelect.value = storedShow || 'both';
       } catch (e) { console.warn('[TTS] localStorage access error (showLang):', e); }
       applyLanguageFilter();
 
       // Change visibility and reset playback when filter changes
       showLangSelect.addEventListener('change', () => {
-        try { localStorage.setItem(LS.showLang, showLangSelect.value); } catch(e) {}
+        try { if (localStorageAvailable) localStorage.setItem(LS.showLang, showLangSelect.value); } catch(e) { console.warn('[TTS] localStorage set error (showLang):', e); }
         applyLanguageFilter();
         window.speechSynthesis.cancel();
         currentIndex = -1;
@@ -544,6 +585,8 @@
         u.onstart = () => { if (DEBUG_TTS) console.log(`[TTS] onstart idx=${item.idx} lang=${item.lang}`); userPaused = false; speakNextCallDepth = 0; markPlaying(item.idx); };
         u.onend = () => {
           if (DEBUG_TTS) console.log(`[TTS] onend idx=${item.idx}`);
+          // Save progress after each paragraph
+          saveProgressToServer(item.idx + 1); // Save the next paragraph index
           if (currentIndex + 1 >= queue.length) {
             // Finished last paragraph; clear playing state and stop
             paras.forEach(el => { el.classList.remove('playing'); el.classList.remove('paired'); });
@@ -685,10 +728,24 @@
         //   console.log('[TTS] Starting auto-play from paragraph 0');
         //   speakParagraphs(0);
         // }, 300);
+        // Start from saved position - just position, don't auto-start
+        setTimeout(() => {
+          console.log('[TTS] Positioning to saved paragraph:', savedParagraphIndex);
+          if (savedParagraphIndex > 0 && savedParagraphIndex < paras.length) {
+            // Scroll to and highlight the saved paragraph
+            const el = paras[savedParagraphIndex];
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              el.classList.add('playing'); // Highlight it
+            }
+          }
+        }, 300);
       });
 
       // Clean up wake lock on unload
-      window.addEventListener('beforeunload', () => { releaseWakeLock(); });
+      window.addEventListener('beforeunload', () => { 
+        releaseWakeLock(); 
+      });
     </script>
   </body>
 </html>

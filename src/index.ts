@@ -16,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3888;
 const UPLOADS_DIR = path.join(__dirname, '../data/uploads');
+const PROGRESS_FILE = path.join(__dirname, '../data/progress.json');
 const translationService = new TranslationService();
 const readerService = new ReaderService();
 
@@ -103,6 +104,27 @@ function formatFileSize(bytes: number): string {
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Helper functions for progress
+function loadProgress(): Record<string, Record<string, number>> {
+  try {
+    if (fs.existsSync(PROGRESS_FILE)) {
+      const data = fs.readFileSync(PROGRESS_FILE, 'utf8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Error loading progress:', error);
+  }
+  return {};
+}
+
+function saveProgress(progress: Record<string, Record<string, number>>): void {
+  try {
+    fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2));
+  } catch (error) {
+    console.error('Error saving progress:', error);
+  }
 }
 
 // Routes
@@ -279,11 +301,38 @@ app.get('/tts', async (req, res) => {
       docs,
       docLabels,
       doc: selectedDoc,
+      // Load saved progress
+      savedParagraphIndex: loadProgress()[selectedBook]?.[selectedDoc] || 0,
     });
   } catch (error) {
     console.error('Error in /tts:', error);
     res.status(500).send('Internal error preparing TTS page');
   }
+});
+
+// Progress routes
+app.get('/get-progress', (req, res) => {
+  const { book, doc } = req.query;
+  if (!book || !doc) {
+    return res.status(400).json({ error: 'Book and doc parameters required' });
+  }
+  const progress = loadProgress();
+  const paragraphIndex = progress[book as string]?.[doc as string] || 0;
+  console.log('[SERVER] Loaded progress:', { book, doc, paragraphIndex });
+  res.json({ paragraphIndex });
+});
+
+app.post('/save-progress', (req, res) => {
+  const { book, doc, paragraphIndex } = req.body;
+  if (!book || !doc || typeof paragraphIndex !== 'number') {
+    return res.status(400).json({ error: 'Book, doc, and paragraphIndex required' });
+  }
+  console.log('[SERVER] Saving progress:', { book, doc, paragraphIndex });
+  const progress = loadProgress();
+  if (!progress[book]) progress[book] = {};
+  progress[book][doc] = paragraphIndex;
+  saveProgress(progress);
+  res.json({ success: true });
 });
 
 // Test endpoint to verify server is working

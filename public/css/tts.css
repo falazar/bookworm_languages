@@ -1,0 +1,165 @@
+/* Dark theme for comfortable reading */
+:root {
+  --base-font: 17px;
+}
+body {
+  font-family: system-ui, Arial, sans-serif;
+  margin: 20px 10%;
+  font-size: var(--base-font);
+  background: #000;
+  color: #e6e6e6;
+}
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #d0d0d0;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.book-name {
+  max-width: 50vw;
+}
+.book-name code {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+textarea {
+  width: 100%;
+  min-height: 120px;
+  background: #0c0c0c;
+  color: #e6e6e6;
+  border: 1px solid #333;
+}
+input[type='range'] {
+  min-width: 220px;
+}
+/* Unified dropdown styling */
+select {
+  display: inline-block;
+  width: fit-content;
+  min-width: 0;
+  max-width: 60vw;
+  padding: 8px 12px;
+  font-size: 16px;
+  line-height: 1.25;
+  background: #1c1f29;
+  color: #f0f0f0;
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+input[type='range'] {
+  accent-color: #66a3ff;
+}
+button {
+  padding: 6px 12px;
+  background: #1a1a1a;
+  color: #f0f0f0;
+  border: 1px solid #333;
+}
+.btn {
+  padding: 6px 12px;
+  background: #1a1a1a;
+  color: #f0f0f0;
+  border: 1px solid #333;
+  border-radius: 4px;
+  text-decoration: none;
+  display: inline-block;
+  white-space: nowrap;
+}
+.settings-toggle {
+  margin-left: 12px;
+}
+.settings-panel {
+  display: none;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+}
+.settings-panel.open {
+  display: flex;
+}
+
+.para {
+  margin: 8px 0;
+  padding: 6px 8px;
+  border-left: 3px solid #222;
+  background: #0a0a0a;
+}
+/* Slight highlight and bold for both FR and EN paragraphs of the active pair */
+.para.paired {
+  box-shadow: inset 0 0 0 9999px rgba(255, 255, 180, 0.06);
+  font-weight: 700;
+}
+/* Stronger emphasis and light yellow text for the paragraph being read */
+.para.playing {
+  border-left-color: #ffd54f;
+  background: #2a240f;
+  font-weight: 700;
+  color: #ffeaa7;
+}
+.para.hidden {
+  display: none;
+}
+/* Tint by language on dark */
+.para[data-lang='fr'] {
+  border-left-color: #d83b01;
+  background: #1a0f0a;
+}
+.para[data-lang='en'] {
+  border-left-color: #107c10;
+  background: #0f1a0f;
+}
+
+footer {
+  margin-top: 16px;
+  font-size: 13px;
+  color: #a0a0a0;
+}
+
+.legend {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin: 32px 0 12px;
+  font-size: 13px;
+  color: #a0a0a0;
+}
+.swatch {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  border: 1px solid #555;
+  margin-right: 6px;
+}
+.swatch.fr {
+  background: #1d120d;
+  border-color: #d83b01;
+}
+.swatch.en {
+  background: #101d10;
+  border-color: #107c10;
+}
+.break {
+  flex-basis: 100%;
+  height: 0;
+}

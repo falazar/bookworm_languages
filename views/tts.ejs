@@ -5,58 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title><%= title %></title>
-    <style>
-      /* Dark theme for comfortable reading */
-      :root { --base-font: 17px; }
-      body { font-family: system-ui, Arial, sans-serif; margin: 20px 10%; font-size: var(--base-font); background: #000; color: #e6e6e6; }
-      header { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #d0d0d0; }
-      .header-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
-      .book-name { max-width: 50vw; }
-      .book-name code { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .controls { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
-      label { display: inline-flex; align-items: center; gap: 6px; }
-      textarea { width: 100%; min-height: 120px; background: #0c0c0c; color: #e6e6e6; border: 1px solid #333; }
-      input[type="range"] { min-width: 220px; }
-      /* Unified dropdown styling */
-      select {
-        display: inline-block;
-        width: fit-content;
-        min-width: 0;
-        max-width: 60vw;
-        padding: 8px 12px;
-        font-size: 16px;
-        line-height: 1.25;
-        background: #1c1f29;
-        color: #f0f0f0;
-        border: 1px solid #444;
-        border-radius: 6px;
-      }
-      input[type="range"] { accent-color: #66a3ff; }
-      button { padding: 6px 12px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #333; }
-      .btn { padding: 6px 12px; background: #1a1a1a; color: #f0f0f0; border: 1px solid #333; border-radius: 4px; text-decoration: none; display: inline-block; white-space: nowrap; }
-      .settings-toggle { margin-left: 12px; }
-      .settings-panel { display: none; flex-wrap: wrap; gap: 12px; margin-top: 12px; }
-      .settings-panel.open { display: flex; }
-      
-
-      .para { margin: 8px 0; padding: 6px 8px; border-left: 3px solid #222; background: #0a0a0a; }
-      /* Slight highlight and bold for both FR and EN paragraphs of the active pair */
-      .para.paired { box-shadow: inset 0 0 0 9999px rgba(255, 255, 180, 0.06); font-weight: 700; }
-      /* Stronger emphasis and light yellow text for the paragraph being read */
-      .para.playing { border-left-color: #ffd54f; background: #2a240f; font-weight: 700; color: #ffeaa7; }
-      .para.hidden { display: none; }
-      /* Tint by language on dark */
-      .para[data-lang="fr"] { border-left-color: #d83b01; background: #1a0f0a; }
-      .para[data-lang="en"] { border-left-color: #107c10; background: #0f1a0f; }
-
-      footer { margin-top: 16px; font-size: 13px; color: #a0a0a0; }
-
-      .legend { display: flex; gap: 18px; align-items: center; margin: 32px 0 12px; font-size: 13px; color: #a0a0a0; }
-      .swatch { width: 12px; height: 12px; display: inline-block; border: 1px solid #555; margin-right: 6px; }
-      .swatch.fr { background: #1d120d; border-color: #d83b01; }
-      .swatch.en { background: #101d10; border-color: #107c10; }
-      .break { flex-basis: 100%; height: 0; }
-    </style>
+    <link rel="stylesheet" href="/css/tts.css">
   </head>
   <body>
     <header>
@@ -144,6 +93,37 @@
     </footer>
 
     <script>
+      console.log('[TTS] Script starting');
+      console.log('[TTS] Note: The "Uncaught (in promise) Error: Access to storage" errors are from browser extensions and can be ignored');
+        
+        // Disable scroll restoration to prevent browser from interfering
+        if ('scrollRestoration' in history) {
+          history.scrollRestoration = 'manual';
+        }
+
+        // Global error handler to catch any uncaught errors
+        window.addEventListener('error', (e) => {
+          console.error('[TTS] Uncaught error at:', e.filename, 'line:', e.lineno, 'col:', e.colno);
+          console.error('[TTS] Error message:', e.message);
+          console.error('[TTS] Error object:', e.error);
+          console.error('[TTS] Full event:', e);
+          // Prevent the error from showing in console as uncaught
+          e.preventDefault();
+        });
+
+        window.addEventListener('unhandledrejection', (e) => {
+          console.error('[TTS] Unhandled promise rejection:');
+          console.error('[TTS] Reason:', e.reason);
+          console.error('[TTS] Promise:', e.promise);
+          console.error('[TTS] Full event:', e);
+          // Try to get stack trace
+          if (e.reason && e.reason.stack) {
+            console.error('[TTS] Stack trace:', e.reason.stack);
+          }
+          // Prevent the rejection from showing in console
+          e.preventDefault();
+        });
+
       const bookSelect = document.getElementById('bookSelect');
       const docSelect = document.getElementById('docSelect');
       const voiceSelectEn = document.getElementById('voiceSelectEn');
@@ -242,10 +222,12 @@
 
       // Check if localStorage is available
       function isLocalStorageAvailable() {
+        console.log('[TTS] Checking localStorage availability');
         try {
           const test = '__localStorage_test__';
           localStorage.setItem(test, test);
           localStorage.removeItem(test);
+          console.log('[TTS] localStorage is available');
           return true;
         } catch (e) {
           console.warn('[TTS] localStorage not available:', e);
@@ -282,6 +264,7 @@
       }
 
       function loadBooks() {
+        console.log('[TTS] loadBooks called');
         bookSelect.innerHTML = '';
         books.forEach(b => {
           const opt = document.createElement('option');
@@ -290,6 +273,7 @@
           bookSelect.appendChild(opt);
         });
         let storedBook;
+        console.log('[TTS] About to get storedBook from localStorage');
         try { if (localStorageAvailable) storedBook = localStorage.getItem(LS.book); } catch(e) { console.warn('[TTS] localStorage error (book):', e); }
         const chosenBook = storedBook && books.includes(storedBook) ? storedBook : currentBook;
         if (chosenBook) {
@@ -306,6 +290,7 @@
       }
 
       function loadDocs() {
+        console.log('[TTS] loadDocs called');
         docSelect.innerHTML = '';
         docs.forEach((d, idx) => {
           const opt = document.createElement('option');
@@ -326,6 +311,7 @@
           docSelect.appendChild(opt);
         });
         let storedDoc;
+        console.log('[TTS] About to get storedDoc from localStorage');
         try { if (localStorageAvailable) storedDoc = localStorage.getItem(LS.doc); } catch(e) { console.warn('[TTS] localStorage error (doc):', e); }
         const chosenDoc = storedDoc && docs.includes(storedDoc) ? storedDoc : currentDoc;
         if (chosenDoc) docSelect.value = chosenDoc;
@@ -410,9 +396,6 @@
       // On chapter change, navigate within book
       docSelect.addEventListener('change', () => {
         const d = docSelect.value;
-        // Save progress for current chapter before changing
-        /// ahh we just need per book dont need this todo
-        saveProgressToServer(currentPlayingIdx >= 0 ? currentPlayingIdx : 0);
         try { if (localStorageAvailable) localStorage.setItem(LS.doc, d); } catch(e) { console.warn('[TTS] localStorage set error (doc):', e); }
         const url = new URL(window.location.href);
         url.searchParams.set('book', bookSelect.value || currentBook);
@@ -448,8 +431,6 @@
         const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
         if (idx < 0 || idx >= docs.length - 1) return;
         const nextDoc = docs[idx + 1];
-        // Save progress for current chapter
-        saveProgressToServer(currentPlayingIdx >= 0 ? currentPlayingIdx : 0);
         try { if (localStorageAvailable) localStorage.setItem(LS.doc, nextDoc); } catch(e) { console.warn('[TTS] localStorage set error (nextDoc):', e); }
         const url = new URL(window.location.href);
         url.searchParams.set('book', bookSelect.value || currentBook);
@@ -707,39 +688,75 @@
 
       // Auto-start on load for convenience
       window.addEventListener('load', () => {
-        console.log('[TTS] Page load event fired');
-        // Clear hash that might be keeping page scrolled down
-        if (window.location.hash) {
-          history.replaceState(null, null, ' ');
-        }
-        // Scroll to top using ALL methods
-        window.scrollTo(0, 0);
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-        // Force scroll again after a frame
-        requestAnimationFrame(() => {
-          window.scrollTo(0, 0);
-          document.documentElement.scrollTop = 0;
-          document.body.scrollTop = 0;
-          console.log('[TTS] Scrolled to top');
-        });
-        // Small delay to allow voices to populate
-        // setTimeout(() => {
-        //   console.log('[TTS] Starting auto-play from paragraph 0');
-        //   speakParagraphs(0);
-        // }, 300);
-        // Start from saved position - just position, don't auto-start
-        setTimeout(() => {
-          console.log('[TTS] Positioning to saved paragraph:', savedParagraphIndex);
-          if (savedParagraphIndex > 0 && savedParagraphIndex < paras.length) {
-            // Scroll to and highlight the saved paragraph
-            const el = paras[savedParagraphIndex];
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              el.classList.add('playing'); // Highlight it
+        try {
+          console.log('[TTS] Page load event fired');
+          // Clear hash that might be keeping page scrolled down
+          console.log('[TTS] Skipping hash clear to avoid storage errors');
+          // try {
+          //   if (window.location.hash) {
+          //     // Use pushState instead of replaceState to avoid storage issues
+          //     const url = new URL(window.location.href);
+          //     url.hash = '';
+          //     window.history.pushState({}, '', url.toString());
+          //     console.log('[TTS] Hash cleared with pushState');
+          //   }
+          // } catch (err) {
+          //   console.error('[TTS] Error clearing hash:', err);
+          // }
+          // Scroll to top using ALL methods
+          console.log('[TTS] About to scroll to top');
+          // Don't manipulate scroll - let scrollIntoView handle it
+          // window.scrollTo(0, 0);
+          // document.documentElement.scrollTop = 0;
+          // document.body.scrollTop = 0;
+          // Force scroll again after a frame
+          // requestAnimationFrame(() => {
+          //   console.log('[TTS] In requestAnimationFrame, scrolling again');
+          //   try {
+          //     window.scrollTo(0, 0);
+          //     document.documentElement.scrollTop = 0;
+          //     document.body.scrollTop = 0;
+          //     console.log('[TTS] Scrolled to top');
+          //   } catch (err) {
+          //     console.error('[TTS] Error in scrollTo:', err);
+          //   }
+          //   console.log('[TTS] Exiting requestAnimationFrame');
+          // });
+          console.log('[TTS] After requestAnimationFrame setup');
+          // Small delay to allow voices to populate
+          // setTimeout(() => {
+          //   console.log('[TTS] Starting auto-play from paragraph 0');
+          //   speakParagraphs(0);
+          // }, 300);
+          // Start from saved position - just position, don't auto-start
+          console.log('[TTS] About to setup setTimeout for positioning');
+
+          setTimeout(() => {
+            console.log('[TTS] Inside setTimeout callback');
+            console.log('[TTS] Positioning to saved paragraph:', savedParagraphIndex);
+            if (savedParagraphIndex > 0 && savedParagraphIndex < paras.length) {
+              // Scroll to and highlight the saved paragraph
+              const el = paras[savedParagraphIndex];
+              if (el) {
+                console.log('[TTS] About to scrollIntoView');
+                try {
+                  // Use immediate scroll instead of smooth to avoid animation promises
+                  el.scrollIntoView({ behavior: 'auto', block: 'center' });
+                  console.log('[TTS] scrollIntoView completed');
+                } catch (err) {
+                  console.error('[TTS] Error in scrollIntoView:', err);
+                }
+                console.log('[TTS] About to add playing class');
+                el.classList.add('playing'); // Highlight it
+                console.log('[TTS] Added playing class');
+              }
             }
-          }
-        }, 300);
+            console.log('[TTS] Exiting setTimeout callback');
+          }, 300);
+          console.log('[TTS] After setTimeout setup');
+        } catch (e) {
+          console.error('[TTS] Error in load event:', e);
+        }
       });
 
       // Clean up wake lock on unload

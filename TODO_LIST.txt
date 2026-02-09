@@ -12,6 +12,9 @@ COMPLETED TASKS:
 ✅ Add Vitest for testing
 ✅ Create uploads directory
 
+TODO add actual login register and book tracking and chapter and 
+paragraph tracking properly. 
+
 CURRENT FEATURES:
 - Express.js server running on port 3888
 - EJS templating engine

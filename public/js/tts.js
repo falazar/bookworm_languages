@@ -78,6 +78,10 @@ let userPaused = false;
 let currentPlayingIdx = -1;
 // Suppress synthetic click after touch to avoid double-handling
 let lastTouchTs = 0;
+// Track if we're actively playing (not stopped by user)
+let isActivePlaying = false;
+// Track last playing position in case of external interruption
+let lastPlayingIndex = -1;
 
 // Keep screen awake while reading using the Screen Wake Lock API
 let wakeLock = null;
@@ -453,6 +457,7 @@ showLangSelect.addEventListener('change', () => {
     console.warn('[TTS] localStorage set error (showLang):', e);
   }
   applyLanguageFilter();
+  isActivePlaying = false;
   window.speechSynthesis.cancel();
   currentIndex = -1;
   paras.forEach(el => {
@@ -480,6 +485,7 @@ function speakParagraphs(startIdx = 0) {
     console.log(
       `[TTS] speakParagraphs startIdx=${startIdx} filter=${val} queueLen=${queue.length} startPos=${startPos}`
     );
+  isActivePlaying = true;
   requestWakeLock().catch(() => {});
   speakNext();
 }
@@ -527,6 +533,7 @@ function speakNext() {
   if (currentIndex < 0 || currentIndex >= queue.length) {
     currentIndex = 1000;
     currentPlayingIdx = -1;
+    isActivePlaying = false;
     paras.forEach(el => {
       el.classList.remove('playing');
     });
@@ -560,6 +567,7 @@ function speakNext() {
     saveProgressToServer(item.idx + 1); // Save the next paragraph index
     if (currentIndex + 1 >= queue.length) {
       // Finished last paragraph; clear playing state and stop
+      isActivePlaying = false;
       paras.forEach(el => {
         el.classList.remove('playing');
         el.classList.remove('paired');
@@ -575,6 +583,7 @@ function speakNext() {
   u.onerror = e => {
     console.warn('[TTS] error:', e.error);
     if (currentIndex + 1 >= queue.length) {
+      isActivePlaying = false;
       paras.forEach(el => {
         el.classList.remove('playing');
         el.classList.remove('paired');
@@ -589,8 +598,17 @@ function speakNext() {
   window.speechSynthesis.speak(u);
 }
 
+// IMPORTANT: Cross-page speechSynthesis interference prevention
+// The speechSynthesis API is GLOBAL across all Chrome tabs/windows, not isolated per page.
+// Problem: If you pause speech on this page, then go to another page (e.g., translate_tester)
+// and hit play there, it would resume THIS page's paused speech instead of starting fresh.
+// Solution: ALWAYS call cancel() before starting new playback to clear any lingering paused
+// state from other pages. Also set isActivePlaying=false to ensure clean state tracking.
+// This prevents cross-contamination between different TTS-enabled pages.
+
 btnPlay.addEventListener('click', () => {
-  window.speechSynthesis.cancel();
+  isActivePlaying = false; // Clear flag first
+  window.speechSynthesis.cancel(); // Clear any paused state from other pages
   requestWakeLock().catch(() => {});
   speakParagraphs(0);
 });
@@ -606,6 +624,7 @@ btnResume.addEventListener('click', () => {
   window.speechSynthesis.resume();
 });
 btnStop.addEventListener('click', () => {
+  isActivePlaying = false;
   window.speechSynthesis.cancel();
   currentIndex = -1;
   paras.forEach(el => {
@@ -639,6 +658,7 @@ contentEl.addEventListener('click', ev => {
       s.pause();
     } else {
       if (DEBUG_TTS) console.log('[TTS] action: restart (click current idle)');
+      isActivePlaying = false; // Clear flag before cancel
       s.cancel();
       requestWakeLock().catch(() => {});
       speakParagraphs(idx);
@@ -647,6 +667,7 @@ contentEl.addEventListener('click', ev => {
   }
   // Otherwise restart from the clicked paragraph
   if (DEBUG_TTS) console.log('[TTS] action: restart (click other)');
+  isActivePlaying = false; // Clear flag before cancel
   window.speechSynthesis.cancel();
   requestWakeLock().catch(() => {});
   speakParagraphs(idx);

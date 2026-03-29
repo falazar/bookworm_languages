@@ -349,6 +349,7 @@ nextChapterBtn.addEventListener('click', () => {
   const url = new URL(window.location.href);
   url.searchParams.set('book', bookSelect.value || currentBook);
   url.searchParams.set('doc', nextDoc);
+  url.hash = 'p0'; // Start at paragraph 0
   window.location.href = url.toString();
 });
 
@@ -683,10 +684,21 @@ window.addEventListener('load', () => {
 
     setTimeout(() => {
       console.log('[TTS] Inside setTimeout callback');
-      console.log('[TTS] Positioning to saved paragraph:', savedParagraphIndex);
-      if (savedParagraphIndex > 0 && savedParagraphIndex < paras.length) {
-        // Scroll to and highlight the saved paragraph
-        const el = paras[savedParagraphIndex];
+
+      // Check if there's a hash in the URL (e.g., #p0, #p5)
+      let targetIndex = savedParagraphIndex;
+      if (window.location.hash) {
+        const hashMatch = window.location.hash.match(/^#p(\d+)$/);
+        if (hashMatch) {
+          targetIndex = parseInt(hashMatch[1], 10);
+          console.log('[TTS] Hash detected, using paragraph:', targetIndex);
+        }
+      }
+
+      console.log('[TTS] Positioning to paragraph:', targetIndex);
+      if (targetIndex >= 0 && targetIndex < paras.length) {
+        // Scroll to and highlight the target paragraph
+        const el = paras[targetIndex];
         if (el) {
           console.log('[TTS] About to scrollIntoView');
           try {

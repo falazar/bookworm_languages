@@ -103,7 +103,7 @@ export class TranslationService {
       // See if new file has translated text in it or not yet, if any then skip...
       const translatedContentCheck = fs.readFileSync(filePath, 'utf8');
       if (translatedContentCheck.includes('<p class="translated">')) {
-        // console.log(`--Skippin g file ${path.basename(filePath)} as it has already been translated`);
+        // console.log(`--Skipping file ${path.basename(filePath)} as it has already been translated`);
         return { skip: true };
       }
       const DEBUG_TESTING = false;
@@ -124,48 +124,19 @@ export class TranslationService {
           break;
         }
 
-        // STEP 2: Build chunk until we hit >= 5000 chars
-        let chunk = '';
-        let chunkStart = i;
-        while (i < lines.length) {
-          const line = lines[i];
-          const lineWithNewline = line + '\n'; // may not need this?
-
-          // Check if adding this line would exceed safe URL limit
-          // if (chunk.length + lineWithNewline.length > 4700) {
-          // Break slightly smaller
-          if (chunk.length + lineWithNewline.length > 4000) {
-            // Safe URL limit
-            break; // Don't add this line of text, keep it for next chunk
-          }
-
-          chunk += lineWithNewline;
-          i++;
-        }
-
-        // STEP 3: Translate the chunk.
-        console.log(
-          // `\n#######################################################` +
-          `\nSTART TRANSLATING CHUNK #${chunkStart + 1}-${i} of ${lines.length}`
+        const { translatedChunk, wasCached, nextIndex } = await this.translateBookLines(
+          lines,
+          i,
+          targetLang,
+          sourceLang
         );
-        const { translatedChunk, wasCached } = await this.translateChunk(chunk, targetLang, sourceLang);
+        i = nextIndex;
+
         // Append all text to our content.
         translatedContent += translatedChunk;
-
-        if (!wasCached) {
-          const chars = chunk.length;
-          console.log(
-            `\x1b[35m  Processed chunk lines ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters\x1b[0m`
-          );
-        }
-        // console.log(`\x1b[35mDEBUG: Translated chunk:\x1b[0m`, translatedChunk);
-
-        if (DEBUG_TESTING) {
-          console.log('DEBUG TESTING: Breaking after first chunk');
-          break; // Break after first chunk for testing
-        }
       } // while i
-      // Part 3: Close body and html tags.
+
+      // STEP 2: Close body and html tags.
       translatedContent += '</body>\n</html>';
 
       // Write translated content back to the same file
@@ -181,16 +152,56 @@ export class TranslationService {
       if (!DEBUG_TESTING) {
         console.log('\n⏱️ Waiting 120 seconds before processing next file...');
         await new Promise(resolve => setTimeout(resolve, 120000)); // was 160.
-        console.log('✅ Delay complete, continuing to the next file...\n');
+        // console.log('✅ Delay complete, continuing to the next file...\n');
       }
     } catch (error) {
       // console.error(`Error translating file ${filePath}:`, error);
       console.error(`Error translating file ${filePath}`);
-      // rethrow the error
       throw error;
     }
 
     return { translated: true };
+  }
+
+  /**
+   * Builds and translates the next line chunk, returning translated text and the next index.
+   */
+  private async translateBookLines(
+    lines: string[],
+    startIndex: number,
+    targetLang: string,
+    sourceLang: string
+  ): Promise<{ translatedChunk: string; wasCached: boolean; nextIndex: number }> {
+    // STEP 1: Build chunk until we hit >= 5000 chars
+    let chunk = '';
+    let i = startIndex;
+    while (i < lines.length) {
+      const line = lines[i];
+      const lineWithNewline = line + '\n'; // may not need this?
+
+      // Check if adding this line would exceed safe URL limit
+      if (chunk.length + lineWithNewline.length > 4000) {
+        break; // Don't add this line of text, keep it for next chunk
+      }
+
+      chunk += lineWithNewline;
+      i++;
+    }
+
+    // STEP 2: Translate the chunk.
+    console.log(
+      // `\n#######################################################` +
+      `\nSTART TRANSLATING CHUNK #${startIndex + 1}-${i} of ${lines.length}`
+    );
+    const { translatedChunk, wasCached } = await this.translateChunk(chunk, targetLang, sourceLang);
+    if (!wasCached) {
+      const chars = chunk.length;
+      console.log(
+        `\x1b[35m  Processed chunk lines ${startIndex + 1}-${i}/${lines.length} with ${chars} characters\x1b[0m`
+      );
+    }
+
+    return { translatedChunk, wasCached, nextIndex: i };
   }
 
   /**
@@ -212,15 +223,10 @@ export class TranslationService {
     // Use Cheerio to parse partial page.
     const $ = cheerio.load(chunk, { xmlMode: true });
     const header = $('head').html() || '';
-    // const paragraphs = $('body p')
     const paragraphs = $('p')
       .map((_, el) => $(el).text().trim())
       .get();
-    // console.log('DEBUG Header:', header);
-    // console.log('  Paragraphs length:', paragraphs.length);
-    // console.log('DEBUG Paragraphs:', paragraphs);
-
-    const paragraphSeparator = '[[[__BW_PSEP_0001__]]]'; // todo shorter
+    const paragraphSeparator = '[[[__BW_PSEP_0001__]]]';
     const textOnly = paragraphs.join(` ${paragraphSeparator} `);
 
     // For testing we can turn on or off cache.
@@ -235,50 +241,18 @@ export class TranslationService {
     const originalLines = paragraphs;
     if (originalLines.length <= 1) {
       console.log('WARN: Only one or zero original lines found, skipping translation.');
+      // TODO what about single line?
     } else {
-      const { translatedText, wasCached: chunkWasCached } = await this.translateText(
+      const translatedResult = await this.translateParagraphsWithRetry(
         textOnly,
+        originalLines,
+        paragraphSeparator,
         targetLang,
         sourceLang,
         useCache
       );
-      translatedChunk = translatedText;
-      wasCached = chunkWasCached;
-      // console.log(`[CHUNK DEBUG] translateText returned wasCached=${wasCached}`);
-
-      // show before and after
-      if (!wasCached) {
-        // console.log(`\n\x1b[35mDEBUG: Original chunk text:\x1b[0m`, textOnly);
-        // console.log(`\x1b[35mDEBUG: Translated chunk content:\x1b[0m`, translatedChunk);
-
-        // Check that we match:
-        // Split translated chunk using explicit separator token for stable paragraph boundaries.
-        let translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
-
-        // Show length of both original and translated lines in purple.
-        if (originalLines.length !== translatedLines.length) {
-          // TODO if these two dont match, retry again.   This fixes most but not all.
-
-          console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-          console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
-          console.log('\x1b[31mWARN: Line count mismatch between original and translated.\x1b[0m');
-
-          // TODO second chance.
-          const { translatedText, wasCached: chunkWasCached } = await this.translateText(
-            textOnly,
-            targetLang,
-            sourceLang,
-            false // FALSE HERE! retry.
-          );
-          translatedChunk = translatedText;
-          wasCached = chunkWasCached;
-          // Split translated chunk using explicit separator token for stable paragraph boundaries.
-          let translatedLines2 = translatedChunk.split(paragraphSeparator).map(line => line.trim());
-          console.log(`[CHUNK DEBUG] second chance translateText returned wasCached=${wasCached}`);
-          console.log(`\x1b[35m\nDEBUG: 2nd ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-          console.log(`\x1b[35mDEBUG: 2nd TRANSLATED LINES: ${translatedLines2.length}\x1b[0m`);
-        }
-      }
+      translatedChunk = translatedResult.translatedChunk;
+      wasCached = translatedResult.wasCached;
     }
 
     // Split translated chunk using explicit separator token for stable paragraph boundaries.
@@ -304,6 +278,62 @@ export class TranslationService {
 
     const rebuiltChunk = this.rebuildTranslatedChunk(header, originalLines, translatedLines);
     return { translatedChunk: rebuiltChunk, wasCached };
+  }
+
+  /**
+   * Translates paragraph text and retries without cache if separator counts do not match.
+   */
+  private async translateParagraphsWithRetry(
+    textOnly: string,
+    originalLines: string[],
+    paragraphSeparator: string,
+    targetLang: string,
+    sourceLang: string,
+    useCache: boolean
+  ): Promise<{ translatedChunk: string; wasCached: boolean }> {
+    const { translatedText, wasCached: chunkWasCached } = await this.translateText(
+      textOnly,
+      targetLang,
+      sourceLang,
+      useCache
+    );
+    let translatedChunk = translatedText;
+    let wasCached = chunkWasCached;
+    // console.log(`[CHUNK DEBUG] translateText returned wasCached=${wasCached}`);
+    if (wasCached) {
+      return { translatedChunk, wasCached };
+    }
+
+    // Check that we match:
+    // Split translated chunk using explicit separator token for stable paragraph boundaries.
+    const translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
+
+    // If size of both match return now.
+    if (originalLines.length === translatedLines.length) {
+      return { translatedChunk, wasCached };
+    }
+
+    // If these two dont match, retry again.   This fixes most but not all.
+    console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+    console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
+    console.log('\x1b[31mWARN: Line count mismatch between original and translated.\x1b[0m');
+
+    // Second chance.
+    const { translatedText: retriedTranslatedText, wasCached: retriedWasCached } = await this.translateText(
+      textOnly,
+      targetLang,
+      sourceLang,
+      false // FALSE HERE! retry.
+    );
+    translatedChunk = retriedTranslatedText;
+    wasCached = retriedWasCached;
+    // Split translated chunk using explicit separator token for stable paragraph boundaries.
+    const translatedLines2 = translatedChunk.split(paragraphSeparator).map(line => line.trim());
+    console.log(`[CHUNK DEBUG] second chance translateText returned wasCached=${wasCached}`);
+    console.log(`\x1b[35m\nDEBUG: 2nd ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+    console.log(`\x1b[35mDEBUG: 2nd TRANSLATED LINES: ${translatedLines2.length}\x1b[0m`);
+
+    return { translatedChunk, wasCached };
   }
 
   /**

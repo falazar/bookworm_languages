@@ -20,6 +20,8 @@ const PROGRESS_FILE = path.join(__dirname, '../data/progress.json');
 const translationService = new TranslationService();
 const readerService = new ReaderService();
 const WINDOWS_RESERVED_BASENAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const EXPECTED_TRANSLATION_ERROR_MESSAGE =
+  'Failed to open EPUB file: Failed to translate full EPUB: Error during file translation: Could not extract translation from response - check temp_translated.html for debugging';
 
 // Set EJS as the view engine
 app.set('view engine', 'ejs');
@@ -63,6 +65,10 @@ function getUniqueUploadFilename(initialFilename: string): string {
   }
 
   return candidate;
+}
+
+function isExpectedTranslationError(error: unknown): error is Error {
+  return error instanceof Error && error.message === EXPECTED_TRANSLATION_ERROR_MESSAGE;
 }
 
 // Configure multer for file uploads
@@ -271,6 +277,22 @@ app.post('/translate-book', async (req, res) => {
       translatedText: translatedText,
     });
   } catch (error) {
+    if (isExpectedTranslationError(error)) {
+      const requestedFilename = typeof req.body?.filename === 'string' ? req.body.filename : 'unknown';
+      const requestedTargetLanguage =
+        typeof req.body?.targetLanguage === 'string' ? req.body.targetLanguage : 'unknown';
+      const requestedSourceLanguage = typeof req.body?.sourceLanguage === 'string' ? req.body.sourceLanguage : 'auto';
+
+      console.warn(
+        `[TRANSLATION EXPECTED] extractor miss; book=${requestedFilename}; source=${requestedSourceLanguage}; target=${requestedTargetLanguage}`
+      );
+
+      return res.status(500).json({
+        error: 'Translation failed',
+        message: error.message,
+      });
+    }
+
     console.error('\n=== TRANSLATION ERROR ===');
     console.error('Error type:', typeof error);
     console.error('Error message:', error instanceof Error ? error.message : 'Unknown error');

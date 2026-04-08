@@ -2,11 +2,10 @@ import { exec } from 'child_process';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import puppeteer from 'puppeteer';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import * as cheerio from 'cheerio';
-import { Browser } from 'puppeteer';
+import { GoogleTranslateClient } from './services/translation/google-translate-client.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,6 +18,7 @@ export class TranslationService {
   private uploadsDir = path.join(__dirname, '../data/uploads');
   private cacheDir = path.join(__dirname, '../data/cache');
   private cacheMap = new Map<string, string>(); // In-memory cache
+  private googleTranslateClient: GoogleTranslateClient;
 
   constructor() {
     // Initialize cache directory
@@ -26,6 +26,16 @@ export class TranslationService {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }
     this.loadCache();
+
+    this.googleTranslateClient = new GoogleTranslateClient({
+      baseUrl: this.baseUrl,
+      isDebugMode: () => this.debugMode,
+      cache: {
+        getCacheKey: (text, targetLang, sourceLang) => this.getCacheKey(text, targetLang, sourceLang),
+        getFromCache: cacheKey => this.getFromCache(cacheKey),
+        saveToCache: (cacheKey, translation) => this.saveToCache(cacheKey, translation),
+      },
+    });
   }
 
   /**
@@ -291,7 +301,7 @@ export class TranslationService {
     sourceLang: string,
     useCache: boolean
   ): Promise<{ translatedChunk: string; wasCached: boolean }> {
-    const { translatedText, wasCached: chunkWasCached } = await this.translateText(
+    const { translatedText, wasCached: chunkWasCached } = await this.googleTranslateClient.translateText(
       textOnly,
       targetLang,
       sourceLang,
@@ -319,12 +329,13 @@ export class TranslationService {
     console.log('\x1b[31mWARN: Line count mismatch between original and translated.\x1b[0m');
 
     // Second chance.
-    const { translatedText: retriedTranslatedText, wasCached: retriedWasCached } = await this.translateText(
-      textOnly,
-      targetLang,
-      sourceLang,
-      false // FALSE HERE! retry.
-    );
+    const { translatedText: retriedTranslatedText, wasCached: retriedWasCached } =
+      await this.googleTranslateClient.translateText(
+        textOnly,
+        targetLang,
+        sourceLang,
+        false // FALSE HERE! retry.
+      );
     translatedChunk = retriedTranslatedText;
     wasCached = retriedWasCached;
     // Split translated chunk using explicit separator token for stable paragraph boundaries.
@@ -371,243 +382,6 @@ export class TranslationService {
     } // while loop
 
     return returnText;
-  }
-
-  /**
-   * Translates text using Google Translate via Puppeteer
-   * @param text - The text to translate
-   * @param targetLang - Target language code (e.g., 'fr', 'es', 'de')
-   * @param sourceLang - Source language code or 'auto' for auto-detection
-   * @returns Promise<{ translatedText: string; wasCached: boolean }> - The translated text and cache status
-   */
-  async translateText(
-    text: string,
-    targetLang: string,
-    sourceLang: string = 'auto',
-    useCache: boolean = true
-  ): Promise<{ translatedText: string; wasCached: boolean }> {
-    const debugLogs = true;
-
-    // Debug mode - return placeholder text
-    if (this.debugMode) {
-      console.log('DEBUG MODE: Returning placeholder translation');
-      return { translatedText: 'FAKE TRANSLATED TEXT', wasCached: false };
-    }
-
-    // Check cache first
-    const cacheKey = this.getCacheKey(text, targetLang, sourceLang);
-    if (useCache) {
-      const cached = this.getFromCache(cacheKey);
-      if (cached) {
-        // console.log('  ✅ Using cached translation');
-        return { translatedText: cached, wasCached: true };
-      }
-    }
-
-    console.log('  🔄 Fetching new translation...');
-
-    // URL encode the text
-    text = text.replace(/”/g, '"');
-    // console.log('\nDEBUG: BEFORE ENCODING TEXT:', text);
-    // Replace smart quotes and special chars with ASCII
-    text = text.replace('\u2019', "'");
-    text = text.replace('\u2018', "'"); // ' → '
-    text = text.replace('\u201c', '"'); // " → "
-    text = text.replace('\u201d', '"'); // " → "
-    text = text.replace('\u2014', '--'); // — → --
-    text = text.replace('\u2013', '-'); // – → -
-    text = text.replace('“', ' "'); // " → "
-    text = text.replace('”', '" '); // " → "
-    text = text.replace('—', '--'); // — → --
-    // do smart single quote:
-    text = text.replace('’', "'");
-
-    // Check for an over limit size maybe here?
-    if (text.length > 5000) {
-      console.log('DEBUG: Text length:', text.length);
-      console.log('ERROR: Text is too long to translate, debug test shortening.');
-      // chop it for testing...
-      text = text.substring(0, 5000);
-      // console.log('Chopped text to:', text);
-      // TODO is this ever hitting?
-    }
-
-    const encodedText = encodeURIComponent(text);
-    if (debugLogs) {
-      // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
-      // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
-    }
-
-    // Build the translation URL
-    const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
-    if (debugLogs) {
-      // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
-    }
-
-    const translation = await this.fetchTranslationPageData(url);
-    if (!translation) {
-      throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
-    }
-
-    // console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
-    // First decode URL encoding, then HTML entities
-    let decodedTranslation = translation
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#x27;/g, "'")
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&apos;/g, "'")
-      .replace(/&mdash;/g, '—')
-      .replace(/&ndash;/g, '–')
-      .replace(/&hellip;/g, '…')
-      .replace(/&amp;/g, '&') // Must be last to avoid double-decoding
-      .replace(/&[#\w]+;/g, ''); // Remove any remaining HTML entities
-
-    // Fix common translation issues
-    decodedTranslation = decodedTranslation
-      .replace(/epub: type/g, 'epub:type')
-      .replace(/aria-label = /g, 'aria-label=')
-      .replace(/id = /g, 'id=')
-      .replace(/role = /g, 'role=');
-
-    // add turquiose color for debug text
-    // console.log('\n\x1b[36mDEBUG: TRANSLATED TEXT AFTER HTML DECODING: ', decodedTranslation, '\x1b[0m');
-
-    // Save to cache before returning.
-    this.saveToCache(cacheKey, decodedTranslation);
-    // console.log('💾 Translation saved to cache');
-
-    return { translatedText: decodedTranslation, wasCached: false };
-  }
-
-  /**
-   * Fetches Google Translate page data and extracts translated text from the rendered page.
-   * Also writes the full rendered HTML to `temp_translated_full.html` for debugging.
-   * @param url - Fully constructed Google Translate URL
-   * @returns Promise<string | null> - Extracted translation text, or null if not found
-   */
-  private async fetchTranslationPageData(url: string): Promise<string | null> {
-    let browser: Browser | null = null;
-    try {
-      // Launch Puppeteer browser with stealth settings
-      browser = await puppeteer.launch({
-        headless: true,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--disable-gpu',
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins,site-per-process',
-          '--window-size=1366,768',
-          '--start-maximized',
-          '--lang=en-US,en',
-        ],
-      });
-      const page = await browser.newPage();
-
-      // Set realistic user agent
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      );
-
-      // Remove webdriver property
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty((window as unknown as { navigator: { webdriver?: boolean } }).navigator, 'webdriver', {
-          get: () => false,
-        });
-      });
-
-      // Add chrome object
-      await page.evaluateOnNewDocument(() => {
-        (window as unknown as { chrome?: unknown }).chrome = {
-          runtime: {},
-        };
-      });
-
-      // Override plugins
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty((window as unknown as { navigator: { plugins?: unknown[] } }).navigator, 'plugins', {
-          get: () => [1, 2, 3, 4, 5],
-        });
-      });
-
-      // Add languages
-      await page.evaluateOnNewDocument(() => {
-        Object.defineProperty((window as unknown as { navigator: { languages?: string[] } }).navigator, 'languages', {
-          get: () => ['en-US', 'en'],
-        });
-      });
-
-      // Set extra headers
-      await page.setExtraHTTPHeaders({
-        'Accept-Language': 'en-US,en;q=0.9',
-      });
-
-      await page.setViewport({ width: 1366, height: 768 });
-
-      // Navigate to Google Translate
-      await page.goto(url, {
-        waitUntil: 'networkidle2',
-        timeout: 100000,
-      });
-
-      // Try to find the translation result
-      const translation = await page.evaluate(this.extractTranslationFromHTML);
-
-      // Wait for translation to appear. This also slows request cadence to reduce throttling risk.
-      await new Promise(resolve => setTimeout(resolve, 35000));
-
-      // Save the page content for debugging
-      const pageContent = await page.content();
-      const tempFilePath = path.join(__dirname, '../temp_translated_full.html');
-      fs.writeFileSync(tempFilePath, pageContent);
-      // console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
-
-      return translation;
-    } catch (error) {
-      console.error('\nTranslation error:', error);
-      throw new Error(`Translation failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
-    } finally {
-      if (browser) {
-        await browser.close();
-      }
-    }
-  }
-
-  // Extract translation from HTML content from googles page after page loads.
-  private extractTranslationFromHTML(): string | null {
-    // First try to extract from data-text attribute using regex
-    const htmlContent = document.documentElement.outerHTML;
-
-    // Look for non-English translations with better quote handling
-    const dataTextMatches = htmlContent.match(/data-language-name="([^"]+)"[^>]*data-text="([^"]*(?:\\.[^"]*)*)"/g);
-    if (!dataTextMatches) {
-      console.log('No dataTextMatches found from google page after page loads.');
-    } else {
-      console.log('dataTextMatches found from google page after page loads.');
-    }
-
-    // Loop and find out language match now.
-    if (dataTextMatches) {
-      for (const match of dataTextMatches) {
-        const languageMatch = match.match(/data-language-name="([^"]+)"/);
-        const textMatch = match.match(/data-text="([^"]*(?:\\.[^"]*)*)"/);
-
-        if (languageMatch && textMatch && languageMatch[1] !== 'English') {
-          // console.log('DEBUG: Found text match:', textMatch[1]);
-          return textMatch[1];
-        }
-      }
-    }
-
-    return null;
   }
 
   /**

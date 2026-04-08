@@ -103,7 +103,7 @@
     
     <script>
         // Store filename for later use
-        const filename = '<%= filename %>';
+        const filename = <%- JSON.stringify(filename) %>;
 
         // Global helper to auto-click Translate after a delay (uses deadline for accuracy)
         function scheduleAutoTranslate() {

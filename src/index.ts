@@ -19,10 +19,51 @@ const UPLOADS_DIR = path.join(__dirname, '../data/uploads');
 const PROGRESS_FILE = path.join(__dirname, '../data/progress.json');
 const translationService = new TranslationService();
 const readerService = new ReaderService();
+const WINDOWS_RESERVED_BASENAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
 
 // Set EJS as the view engine
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, '../views'));
+
+function sanitizeFilenameForStorage(originalName: string): string {
+  const safeInput = typeof originalName === 'string' ? originalName : '';
+  const parsed = path.parse(path.basename(safeInput));
+  const originalBase = parsed.name || 'book';
+
+  let base = originalBase
+    .normalize('NFKC')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[<>:"/\\|?*]+/g, '_')
+    .replace(/[. ]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!base) {
+    base = 'book';
+  }
+
+  if (WINDOWS_RESERVED_BASENAME.test(base)) {
+    base = `book_${base}`;
+  }
+
+  return `${base}.epub`;
+}
+
+function getUniqueUploadFilename(initialFilename: string): string {
+  const parsed = path.parse(initialFilename);
+  const base = parsed.name || 'book';
+  const ext = parsed.ext || '.epub';
+
+  let candidate = `${base}${ext}`;
+  let counter = 1;
+
+  while (fs.existsSync(path.join(UPLOADS_DIR, candidate))) {
+    counter += 1;
+    candidate = `${base}_${counter}${ext}`;
+  }
+
+  return candidate;
+}
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -30,8 +71,10 @@ const storage = multer.diskStorage({
     cb(null, UPLOADS_DIR);
   },
   filename: (req, file, cb) => {
-    // Keep original filename
-    cb(null, file.originalname);
+    // Normalize filename so uploads are always safe across OS/filesystem boundaries.
+    const normalized = sanitizeFilenameForStorage(file.originalname);
+    const uniqueName = getUniqueUploadFilename(normalized);
+    cb(null, uniqueName);
   },
 });
 
@@ -172,6 +215,9 @@ app.post('/upload', upload.single('epubFile'), (req, res) => {
 
 app.get('/translate/:filename', (req, res) => {
   const filename = req.params.filename;
+  if (!isSafeFilename(filename)) {
+    return res.status(400).send('Invalid filename');
+  }
   const filePath = path.join(UPLOADS_DIR, filename);
 
   // Check if file exists
@@ -207,6 +253,10 @@ app.post('/translate-book', async (req, res) => {
     if (!filename || !targetLanguage) {
       console.log('ERROR: Missing required parameters');
       return res.status(400).json({ error: 'Filename and target language are required' });
+    }
+
+    if (!isSafeFilename(filename)) {
+      return res.status(400).json({ error: 'Invalid filename' });
     }
 
     const translatedText = await translationService.translateBook(
@@ -288,6 +338,17 @@ app.get('/tts', async (req, res) => {
     });
   } catch (error) {
     console.error('Error in /tts:', error);
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    if (message === 'Invalid book filename') {
+      return res.status(400).send('Invalid book filename in request');
+    }
+    if (message === 'Book not in whitelist') {
+      return res
+        .status(404)
+        .send(
+          'Book not found from query parameter. This can happen with apostrophe encoding differences. Open it again from Books -> Read Aloud.'
+        );
+    }
     res.status(500).send('Internal error preparing TTS page');
   }
 });
@@ -303,7 +364,17 @@ function validateAndGetBookPath(
   availableBooks: string[]
 ): { selectedBook: string; epubPath: string } {
   // Select book from query or use first available
-  const selectedBook = requestedBook || availableBooks[0];
+  let selectedBook = requestedBook || availableBooks[0];
+
+  // If query is present, resolve exact or canonical (apostrophe-normalized) match.
+  if (requestedBook && !availableBooks.includes(requestedBook)) {
+    const matchedBook = findMatchingBookFilename(requestedBook, availableBooks);
+    if (!matchedBook) {
+      console.warn('[TTS] SECURITY: Book not in whitelist:', requestedBook);
+      throw new Error('Book not in whitelist');
+    }
+    selectedBook = matchedBook;
+  }
 
   // Validate book filename to prevent path traversal
   if (!isSafeFilename(selectedBook)) {
@@ -335,6 +406,21 @@ function validateAndGetBookPath(
   }
 
   return { selectedBook, epubPath };
+}
+
+function normalizeBookFilenameKey(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019\u02BC\u0060]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+function findMatchingBookFilename(requestedBook: string, availableBooks: string[]): string | undefined {
+  const requestedKey = normalizeBookFilenameKey(requestedBook);
+  const lookup = new Map(availableBooks.map(name => [normalizeBookFilenameKey(name), name]));
+  return lookup.get(requestedKey);
 }
 
 /**
@@ -384,16 +470,40 @@ function getBookPosition(
     throw new Error('Invalid document path');
   }
 
-  // Normalize: remove ./ in front
-  selectedDoc = selectedDoc.replace(/^\.\//g, '');
-
-  // Verify doc exists in EPUB's chapter list (whitelist check)
-  if (!docs.includes(selectedDoc)) {
-    console.warn('[TTS] SECURITY: Doc not in EPUB chapter list:', selectedDoc);
-    throw new Error('Selected document not found in EPUB');
+  const resolvedDoc = resolveDocPathFromChapters(selectedDoc, docs);
+  if (!resolvedDoc) {
+    const fallbackDoc = getPreferredFallbackDoc(docs);
+    if (!fallbackDoc) {
+      throw new Error('No chapters found in EPUB');
+    }
+    console.warn('[TTS] Requested doc not found; falling back to:', fallbackDoc, 'requested:', selectedDoc);
+    selectedDoc = fallbackDoc;
+    paragraphIndex = 0;
+  } else {
+    selectedDoc = resolvedDoc;
   }
 
   return { selectedDoc, paragraphIndex };
+}
+
+function normalizeDocPathForMatch(docPath: string): string {
+  return docPath.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '').trim();
+}
+
+function resolveDocPathFromChapters(requestedDoc: string, docs: string[]): string | undefined {
+  if (docs.includes(requestedDoc)) {
+    return requestedDoc;
+  }
+
+  const requestedKey = normalizeDocPathForMatch(requestedDoc);
+  const lookup = new Map(docs.map(doc => [normalizeDocPathForMatch(doc), doc]));
+  return lookup.get(requestedKey);
+}
+
+function getPreferredFallbackDoc(docs: string[]): string | undefined {
+  const part0001 = docs.find(doc => /(^|\/)part0001\.html$/i.test(normalizeDocPathForMatch(doc)));
+  if (part0001) return part0001;
+  return docs[0];
 }
 
 /**
@@ -406,7 +516,8 @@ function extractParagraphsFromDoc(epubPath: string, selectedDoc: string): Array<
   const zip = new AdmZip(epubPath);
   const entries = zip.getEntries();
 
-  const docEntry = entries.find((e: any) => e.entryName === selectedDoc);
+  const selectedDocKey = normalizeDocPathForMatch(selectedDoc);
+  const docEntry = entries.find((e: any) => normalizeDocPathForMatch(e.entryName) === selectedDocKey);
   if (!docEntry) {
     console.log('[TTS] Selected doc entry not found in EPUB:', selectedDoc);
     throw new Error('Selected document not found in EPUB');
@@ -484,14 +595,26 @@ app.get('/test', (req, res) => {
 // This protects against directory traversal vulnerabilities
 function isSafeFilename(filename: string): boolean {
   if (!filename || typeof filename !== 'string') return false;
+  const trimmed = filename.trim();
+  if (!trimmed) return false;
   // Reject path traversal patterns (../, ..\, ..%2F, etc.)
-  if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) return false;
+  if (trimmed.includes('..') || trimmed.includes('/') || trimmed.includes('\\')) return false;
   // Reject absolute paths
-  if (filename.startsWith('/') || /^[a-zA-Z]:/.test(filename)) return false;
-  // Only allow alphanumeric, dash, underscore, dot (for extensions)
-  if (!/^[a-zA-Z0-9._-]+$/.test(filename)) return false;
+  if (trimmed.startsWith('/') || /^[a-zA-Z]:/.test(trimmed)) return false;
+  // Must be a bare filename only
+  if (path.basename(trimmed) !== trimmed) return false;
+  // Reject control characters and invalid Windows filename chars
+  if (/[\u0000-\u001f\u007f]/.test(trimmed)) return false;
+  if (/[<>:"|?*]/.test(trimmed)) return false;
   // Reject hidden files and special names
-  if (filename.startsWith('.') || filename === '.' || filename === '..') return false;
+  if (trimmed.startsWith('.') || trimmed === '.' || trimmed === '..') return false;
+  // Reject trailing dot or space (invalid on Windows)
+  if (/[. ]$/.test(trimmed)) return false;
+
+  const parsed = path.parse(trimmed);
+  if (parsed.ext.toLowerCase() !== '.epub') return false;
+  if (WINDOWS_RESERVED_BASENAME.test(parsed.name)) return false;
+
   return true;
 }
 

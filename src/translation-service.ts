@@ -6,6 +6,7 @@ import puppeteer from 'puppeteer';
 import { fileURLToPath } from 'url';
 import { promisify } from 'util';
 import * as cheerio from 'cheerio';
+import { Browser } from 'puppeteer';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,6 +16,7 @@ export class TranslationService {
   private debugMode = false; // Set to false to enable real translation
   private debugFlag = true; // Set to false to process all chapters
   private execAsync = promisify(exec);
+  private uploadsDir = path.join(__dirname, '../data/uploads');
   private cacheDir = path.join(__dirname, '../data/cache');
   private cacheMap = new Map<string, string>(); // In-memory cache
 
@@ -37,8 +39,8 @@ export class TranslationService {
     const startTime = new Date();
     console.log(`\n🚀 TRANSLATION STARTED: ${startTime.toISOString()}`);
     console.log(`📁 Filename: ${filename}`);
-    console.log(`🌍 Target Language: ${targetLang}`);
-    console.log(`🌍 Source Language: ${sourceLang}`);
+    // console.log(`🌍 Target Language: ${targetLang}`);
+    // console.log(`🌍 Source Language: ${sourceLang}`);
 
     try {
       const tmpDir = path.join(__dirname, '../data/tmp'); // unused?
@@ -57,18 +59,18 @@ export class TranslationService {
       // fs.mkdirSync(oldEpubDir, { recursive: true });
 
       // Open and read the EPUB file
-      const filePath = path.join(__dirname, '../data/uploads', filename);
-      console.log('📖 Opening EPUB file:', filePath);
+      const filePath = this.resolveSafeUploadPath(filename);
+      // console.log('📖 Opening EPUB file:', filePath);
 
       // Check if file exists
       if (!fs.existsSync(filePath)) {
         console.error('❌ EPUB file not found:', filePath);
         throw new Error(`EPUB file not found: ${filePath}`);
       }
-      console.log('✅ EPUB file exists and is accessible');
+      // console.log('✅ EPUB file exists and is accessible');
 
       // Extract EPUB first, then process files manually
-      console.log('🔄 Starting EPUB translation...');
+      // console.log('🔄 Starting EPUB translation...');
       const newEPUBPath = await this.translateEPUB(filename, targetLang, sourceLang);
       console.log('✅ EPUB translation completed');
 
@@ -101,10 +103,14 @@ export class TranslationService {
       // See if new file has translated text in it or not yet, if any then skip...
       const translatedContentCheck = fs.readFileSync(filePath, 'utf8');
       if (translatedContentCheck.includes('<p class="translated">')) {
-        console.log(`--Skipping file ${path.basename(filePath)} as it has already been translated`);
+        // console.log(`--Skippin g file ${path.basename(filePath)} as it has already been translated`);
         return { skip: true };
       }
       const DEBUG_TESTING = false;
+
+      console.log(
+        `Processing file: ${path.basename(filePath)} - ${new Date().toLocaleTimeString([], { hour12: false })}`
+      );
 
       // TODO: DIVIDE THIS METHOD UP A LITTLE BIT?
       // TODO parse out header and read also.
@@ -126,9 +132,11 @@ export class TranslationService {
           const lineWithNewline = line + '\n'; // may not need this?
 
           // Check if adding this line would exceed safe URL limit
-          if (chunk.length + lineWithNewline.length > 4700) {
+          // if (chunk.length + lineWithNewline.length > 4700) {
+          // Break slightly smaller
+          if (chunk.length + lineWithNewline.length > 4000) {
             // Safe URL limit
-            break; // Don't add this line, keep it for next chunk
+            break; // Don't add this line of text, keep it for next chunk
           }
 
           chunk += lineWithNewline;
@@ -140,14 +148,16 @@ export class TranslationService {
           // `\n#######################################################` +
           `\nSTART TRANSLATING CHUNK #${chunkStart + 1}-${i} of ${lines.length}`
         );
-        const translatedChunk = await this.translateChunk(chunk, targetLang, sourceLang);
+        const { translatedChunk, wasCached } = await this.translateChunk(chunk, targetLang, sourceLang);
         // Append all text to our content.
         translatedContent += translatedChunk;
 
-        const chars = chunk.length;
-        console.log(
-          `\x1b[35m  Processed chunk lines ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters\x1b[0m`
-        );
+        if (!wasCached) {
+          const chars = chunk.length;
+          console.log(
+            `\x1b[35m  Processed chunk lines ${chunkStart + 1}-${i}/${lines.length} with ${chars} characters\x1b[0m`
+          );
+        }
         // console.log(`\x1b[35mDEBUG: Translated chunk:\x1b[0m`, translatedChunk);
 
         if (DEBUG_TESTING) {
@@ -157,11 +167,10 @@ export class TranslationService {
       } // while i
       // Part 3: Close body and html tags.
       translatedContent += '</body>\n</html>';
-      //
 
       // Write translated content back to the same file
       if (DEBUG_TESTING) {
-        // Rename file slightly so it doesnt overwrite us.
+        // Rename file slightly so it doesnt overwrite us english version.
         filePath = filePath.replace('.html', '_FR.html');
       }
       fs.writeFileSync(filePath, translatedContent);
@@ -189,9 +198,13 @@ export class TranslationService {
    * @param chunk - The HTML chunk to translate
    * @param targetLang - Target language code
    * @param sourceLang - Source language code
-   * @returns Promise<string> - The translated chunk
+   * @returns Promise<{ translatedChunk: string; wasCached: boolean }> - The translated chunk and cache status
    */
-  private async translateChunk(chunk: string, targetLang: string, sourceLang: string): Promise<string> {
+  private async translateChunk(
+    chunk: string,
+    targetLang: string,
+    sourceLang: string
+  ): Promise<{ translatedChunk: string; wasCached: boolean }> {
     // First, translate only the text content
     // Extract only text content from the chunk (remove HTML tags)
     const debugFlag = true;
@@ -204,10 +217,11 @@ export class TranslationService {
       .map((_, el) => $(el).text().trim())
       .get();
     // console.log('DEBUG Header:', header);
-    console.log('  Paragraphs length:', paragraphs.length);
+    // console.log('  Paragraphs length:', paragraphs.length);
     // console.log('DEBUG Paragraphs:', paragraphs);
 
-    const textOnly = paragraphs.join('\n\n'); // Join paragraphs with double newlines
+    const paragraphSeparator = '[[[__BW_PSEP_0001__]]]'; // todo shorter
+    const textOnly = paragraphs.join(` ${paragraphSeparator} `);
 
     // For testing we can turn on or off cache.
     let useCache = true;
@@ -217,30 +231,91 @@ export class TranslationService {
     }
 
     let translatedChunk = '';
-    const originalLines = textOnly.split('\n\n');
+    let wasCached = false;
+    const originalLines = paragraphs;
     if (originalLines.length <= 1) {
       console.log('WARN: Only one or zero original lines found, skipping translation.');
     } else {
-      translatedChunk = await this.translateText(textOnly, targetLang, sourceLang, useCache);
+      const { translatedText, wasCached: chunkWasCached } = await this.translateText(
+        textOnly,
+        targetLang,
+        sourceLang,
+        useCache
+      );
+      translatedChunk = translatedText;
+      wasCached = chunkWasCached;
+      // console.log(`[CHUNK DEBUG] translateText returned wasCached=${wasCached}`);
+
+      // show before and after
+      if (!wasCached) {
+        // console.log(`\n\x1b[35mDEBUG: Original chunk text:\x1b[0m`, textOnly);
+        // console.log(`\x1b[35mDEBUG: Translated chunk content:\x1b[0m`, translatedChunk);
+
+        // Check that we match:
+        // Split translated chunk using explicit separator token for stable paragraph boundaries.
+        let translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
+
+        // Show length of both original and translated lines in purple.
+        if (originalLines.length !== translatedLines.length) {
+          // TODO if these two dont match, retry again.   This fixes most but not all.
+
+          console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+          console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
+          console.log('\x1b[31mWARN: Line count mismatch between original and translated.\x1b[0m');
+
+          // TODO second chance.
+          const { translatedText, wasCached: chunkWasCached } = await this.translateText(
+            textOnly,
+            targetLang,
+            sourceLang,
+            false // FALSE HERE! retry.
+          );
+          translatedChunk = translatedText;
+          wasCached = chunkWasCached;
+          // Split translated chunk using explicit separator token for stable paragraph boundaries.
+          let translatedLines2 = translatedChunk.split(paragraphSeparator).map(line => line.trim());
+          console.log(`[CHUNK DEBUG] second chance translateText returned wasCached=${wasCached}`);
+          console.log(`\x1b[35m\nDEBUG: 2nd ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+          console.log(`\x1b[35mDEBUG: 2nd TRANSLATED LINES: ${translatedLines2.length}\x1b[0m`);
+        }
+      }
     }
 
-    // Then split both original and translated into lines and intersperse them
-    const translatedLines = translatedChunk.split('\n\n');
-
-    let returnText = '';
+    // Split translated chunk using explicit separator token for stable paragraph boundaries.
+    let translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
 
     // Show length of both original and translated lines in purple
-    // console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-    // console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
     if (originalLines.length !== translatedLines.length) {
-      // console.log('WARN: Line count mismatch between original and translated.');
+      console.log(
+        `\x1b[31mWARN: 2 Line count mismatch between original ${originalLines.length} and translated ${translatedLines.length}.\x1b[0m`
+      );
+      console.log(`\x1b[35m\nDEBUG: 2 ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+      console.log(`\x1b[35mDEBUG: 2 TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
     }
-    // console.log(`\x1b[35m\nDEBUG: STARTING TO MERGE ORIGINAL AND TRANSLATED LINES...\x1b[0m`);
-    // console.log(`-------------------------------------------------------`);
-    // console.log('\x1b[35moriginalLines:', originalLines);
-    // console.log('\x1b[35mtranslatedLines:', translatedLines);
 
+    if (!wasCached) {
+      // console.log(
+      //   `\x1b[35m\nDEBUG: STARTING TO MERGE ORIGINAL:${originalLines.length} AND TRANSLATED:${translatedLines.length} LINES...\x1b[0m`
+      // );
+      // console.log(`-------------------------------------------------------`);
+      // console.log('\x1b[35moriginalLines:', originalLines);
+      // console.log('\x1b[35mtranslatedLines:', translatedLines);
+    }
+
+    const rebuiltChunk = this.rebuildTranslatedChunk(header, originalLines, translatedLines);
+    return { translatedChunk: rebuiltChunk, wasCached };
+  }
+
+  /**
+   * Rebuilds translated XHTML by combining header markup with translated/original paragraph pairs.
+   * @param header - Inner `<head>` markup extracted from the source chunk
+   * @param originalLines - Original paragraph text lines
+   * @param translatedLines - Translated paragraph text lines
+   * @returns string - Reconstructed XHTML fragment
+   */
+  private rebuildTranslatedChunk(header: string, originalLines: string[], translatedLines: string[]): string {
     // PART 1: Write header back on top.
+    let returnText = '';
     if (header) {
       returnText +=
         "<?xml version='1.0' encoding='utf-8'?>\n" +
@@ -256,10 +331,8 @@ export class TranslationService {
     let translatedIndex = 0;
     while (originalIndex < 1000 && (originalIndex < originalLines.length || translatedIndex < translatedLines.length)) {
       const originalLine = originalIndex < originalLines.length ? originalLines[originalIndex] : '';
-      const translatedLine = translatedIndex < translatedLines.length ? translatedLines[translatedIndex].trim() : '';
-
+      const translatedLine = translatedIndex < translatedLines.length ? translatedLines[translatedIndex] : '';
       returnText += '<p class="translated">' + translatedLine + '</p>\n';
-
       const italicLine = '<p style="font-style: italic;">';
       returnText += italicLine + originalLine + '</p>\n\n';
 
@@ -275,71 +348,119 @@ export class TranslationService {
    * @param text - The text to translate
    * @param targetLang - Target language code (e.g., 'fr', 'es', 'de')
    * @param sourceLang - Source language code or 'auto' for auto-detection
-   * @returns Promise<string> - The translated text
+   * @returns Promise<{ translatedText: string; wasCached: boolean }> - The translated text and cache status
    */
   async translateText(
     text: string,
     targetLang: string,
     sourceLang: string = 'auto',
     useCache: boolean = true
-  ): Promise<string> {
+  ): Promise<{ translatedText: string; wasCached: boolean }> {
     const debugLogs = true;
 
     // Debug mode - return placeholder text
     if (this.debugMode) {
       console.log('DEBUG MODE: Returning placeholder translation');
-      return 'FAKE TRANSLATED TEXT';
+      return { translatedText: 'FAKE TRANSLATED TEXT', wasCached: false };
     }
 
     // Check cache first
     const cacheKey = this.getCacheKey(text, targetLang, sourceLang);
-    const cached = this.getFromCache(cacheKey);
-    if (cached) {
-      console.log('  ✅ Using cached translation');
-      return cached;
+    if (useCache) {
+      const cached = this.getFromCache(cacheKey);
+      if (cached) {
+        // console.log('  ✅ Using cached translation');
+        return { translatedText: cached, wasCached: true };
+      }
     }
 
     console.log('  🔄 Fetching new translation...');
 
-    let browser;
+    // URL encode the text
+    text = text.replace(/”/g, '"');
+    // console.log('\nDEBUG: BEFORE ENCODING TEXT:', text);
+    // Replace smart quotes and special chars with ASCII
+    text = text.replace('\u2019', "'");
+    text = text.replace('\u2018', "'"); // ' → '
+    text = text.replace('\u201c', '"'); // " → "
+    text = text.replace('\u201d', '"'); // " → "
+    text = text.replace('\u2014', '--'); // — → --
+    text = text.replace('\u2013', '-'); // – → -
+    text = text.replace('“', ' "'); // " → "
+    text = text.replace('”', '" '); // " → "
+    text = text.replace('—', '--'); // — → --
+    // do smart single quote:
+    text = text.replace('’', "'");
+
+    // Check for an over limit size maybe here?
+    if (text.length > 5000) {
+      console.log('DEBUG: Text length:', text.length);
+      console.log('ERROR: Text is too long to translate, debug test shortening.');
+      // chop it for testing...
+      text = text.substring(0, 5000);
+      // console.log('Chopped text to:', text);
+      // TODO is this ever hitting?
+    }
+
+    const encodedText = encodeURIComponent(text);
+    if (debugLogs) {
+      // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
+      // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
+    }
+
+    // Build the translation URL
+    const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
+    if (debugLogs) {
+      // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
+    }
+
+    const translation = await this.fetchTranslationPageData(url);
+    if (!translation) {
+      throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
+    }
+
+    // console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
+    // First decode URL encoding, then HTML entities
+    let decodedTranslation = translation
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&#x27;/g, "'")
+      .replace(/&nbsp;/g, ' ')
+      .replace(/&apos;/g, "'")
+      .replace(/&mdash;/g, '—')
+      .replace(/&ndash;/g, '–')
+      .replace(/&hellip;/g, '…')
+      .replace(/&amp;/g, '&') // Must be last to avoid double-decoding
+      .replace(/&[#\w]+;/g, ''); // Remove any remaining HTML entities
+
+    // Fix common translation issues
+    decodedTranslation = decodedTranslation
+      .replace(/epub: type/g, 'epub:type')
+      .replace(/aria-label = /g, 'aria-label=')
+      .replace(/id = /g, 'id=')
+      .replace(/role = /g, 'role=');
+
+    // add turquiose color for debug text
+    // console.log('\n\x1b[36mDEBUG: TRANSLATED TEXT AFTER HTML DECODING: ', decodedTranslation, '\x1b[0m');
+
+    // Save to cache before returning.
+    this.saveToCache(cacheKey, decodedTranslation);
+    // console.log('💾 Translation saved to cache');
+
+    return { translatedText: decodedTranslation, wasCached: false };
+  }
+
+  /**
+   * Fetches Google Translate page data and extracts translated text from the rendered page.
+   * Also writes the full rendered HTML to `temp_translated_full.html` for debugging.
+   * @param url - Fully constructed Google Translate URL
+   * @returns Promise<string | null> - Extracted translation text, or null if not found
+   */
+  private async fetchTranslationPageData(url: string): Promise<string | null> {
+    let browser: Browser | null = null;
     try {
-      // URL encode the text
-      text = text.replace(/”/g, '"');
-      // console.log('\nDEBUG: BEFORE ENCODING TEXT:', text);
-      // Replace smart quotes and special chars with ASCII
-      text = text.replace('\u2019', "'");
-      text = text.replace('\u2018', "'"); // ' → '
-      text = text.replace('\u201c', '"'); // " → "
-      text = text.replace('\u201d', '"'); // " → "
-      text = text.replace('\u2014', '--'); // — → --
-      text = text.replace('\u2013', '-'); // – → -
-      text = text.replace('“', ' "'); // " → "
-      text = text.replace('”', '" '); // " → "
-      text = text.replace('—', '--'); // — → --
-      // do smart single quote:
-      text = text.replace('’', "'");
-
-      // Check for an over limit size maybe here?
-      if (text.length > 5000) {
-        console.log('DEBUG: Text length:', text.length);
-        console.log('ERROR: Text is too long to translate, debug test shortening.');
-        // chop it for testing...
-        text = text.substring(0, 5000);
-        // console.log('Chopped text to:', text);
-      }
-
-      const encodedText = encodeURIComponent(text);
-      if (debugLogs) {
-        // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
-        // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
-      }
-
-      // Build the translation URL
-      const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
-      if (debugLogs) {
-        // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
-      }
-
       // Launch Puppeteer browser with stealth settings
       browser = await puppeteer.launch({
         headless: true,
@@ -402,31 +523,16 @@ export class TranslationService {
       await page.setViewport({ width: 1366, height: 768 });
 
       // Navigate to Google Translate
-      // console.log('\nLoading Google Translate page...');
       await page.goto(url, {
         waitUntil: 'networkidle2',
-        // timeout: 10000,
         timeout: 100000,
       });
 
       // Try to find the translation result
       const translation = await page.evaluate(this.extractTranslationFromHTML);
 
-      // Wait for translation to appear
-      //   console.log('Waiting for translation to load...');
-      // Delay here for page load and also not to hit translation server too fast!
-      // await new Promise(resolve => setTimeout(resolve, 3000)); // Was 3 second lowered to 1.
-      // await new Promise(resolve => setTimeout(resolve, 6000)); // Was 6 second raised from 3.
-      // failed on first part of chapter two, increasing from 6 to 10.
-      // await new Promise(resolve => setTimeout(resolve, 10000)); // Was 10 second raised from 6. 2 sections done on ch2 then failed.
-      // await new Promise(resolve => setTimeout(resolve, 20000)); // Was 10 raised to 20 4 sections in ch2 then failed.
-      // It seems to be showing spanish version after this limit.
-      await new Promise(resolve => setTimeout(resolve, 35000)); // Was 20 raised to 30 ?
-
-      // 1 seemed to work ok. not working now
-      // 2 was working ok for alot, back up to 3 to test larger.
-      // 400 was too fast or the ones before it were, hmmm
-      //   await new Promise(resolve => setTimeout(resolve, 3000));
+      // Wait for translation to appear. This also slows request cadence to reduce throttling risk.
+      await new Promise(resolve => setTimeout(resolve, 35000));
 
       // Save the page content for debugging
       const pageContent = await page.content();
@@ -434,42 +540,7 @@ export class TranslationService {
       fs.writeFileSync(tempFilePath, pageContent);
       // console.log(`Debug: Saved full Google Translate page content to ${tempFilePath}`);
 
-      if (!translation) {
-        throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
-      }
-
-      // console.log('\nDEBUG: BEFORE HTML DECODING:', translation);
-
-      // First decode URL encoding, then HTML entities
-      let decodedTranslation = translation
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/&#x27;/g, "'")
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&apos;/g, "'")
-        .replace(/&mdash;/g, '—')
-        .replace(/&ndash;/g, '–')
-        .replace(/&hellip;/g, '…')
-        .replace(/&amp;/g, '&') // Must be last to avoid double-decoding
-        .replace(/&[#\w]+;/g, ''); // Remove any remaining HTML entities
-
-      // Fix common translation issues
-      decodedTranslation = decodedTranslation
-        .replace(/epub: type/g, 'epub:type')
-        .replace(/aria-label = /g, 'aria-label=')
-        .replace(/id = /g, 'id=')
-        .replace(/role = /g, 'role=');
-
-      // add turquiose color for debug text
-      // console.log('\n\x1b[36mDEBUG: TRANSLATED TEXT AFTER HTML DECODING: ', decodedTranslation, '\x1b[0m');
-
-      // Save to cache before returning.
-      this.saveToCache(cacheKey, decodedTranslation);
-      // console.log('💾 Translation saved to cache');
-
-      return decodedTranslation;
+      return translation;
     } catch (error) {
       console.error('\nTranslation error:', error);
       throw new Error(`Translation failed: ${error instanceof Error ? error.message : 'Unknown error occurred'}`);
@@ -518,22 +589,28 @@ export class TranslationService {
    */
   // this appears to translate and stuff as well, maybe break up this method?
   async translateEPUB(originalFilename: string, targetLang: string, sourceLang: string = 'auto'): Promise<string> {
-    console.log(`📁 Original filename: ${originalFilename}`);
+    // console.log(`📁 Original filename: ${originalFilename}`);
 
     try {
-      const originalPath = path.join(__dirname, '../data/uploads', originalFilename);
+      const originalPath = this.resolveSafeUploadPath(originalFilename);
       const baseName = path.parse(originalFilename).name;
       // Remove any trailing language suffixes like _fr, _en, _de, including repeated ones
       const cleanBaseName = baseName.replace(/(_[A-Za-z]{2,3}(?:-[A-Za-z]{2,3})?)+$/g, '');
-      const outputFilename = `${cleanBaseName}_${targetLang}.epub`;
-      const outputPath = path.join(__dirname, '../data/uploads', outputFilename);
+      const safeTargetLang = String(targetLang)
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '');
+      if (!safeTargetLang) {
+        throw new Error('Invalid target language code for output filename');
+      }
+      const outputFilename = `${cleanBaseName}_${safeTargetLang}.epub`;
+      const outputPath = this.resolveSafeUploadPath(outputFilename);
 
       // STEP 1: Setup dirs.
-      console.log('\n📝 STEP 1: Setting up directories...');
+      // console.log('\n📝 STEP 1: Setting up directories...');
       // Create temp directory for extraction
       const oldEpubDir = path.join(__dirname, '../data/old_epub');
       if (fs.existsSync(oldEpubDir)) {
-        console.log('📁 Old EPUB directory already exists, skipping creation and continuing...');
+        // console.log('📁 Old EPUB directory already exists, skipping creation and continuing...');
       } else {
         fs.mkdirSync(oldEpubDir, { recursive: true });
         console.log('📁 Created new EPUB directory for extraction');
@@ -544,14 +621,14 @@ export class TranslationService {
       }
 
       // STEP 3: Detect EPUB content directory structure.
-      console.log('\n📝 STEP 3: Checking if the extracted EPUB getting directory...');
+      // console.log('\n📝 STEP 3: Checking if the extracted EPUB getting directory...');
       const contentDirectory = this.detectEpubContentDirectory(oldEpubDir);
-      console.log(`📂 Final EPUB content directory: ${contentDirectory}`);
+      // console.log(`📂 Final EPUB content directory: ${contentDirectory}`);
 
       // STEP 4: Find all files in the extracted EPUB.
-      console.log('\n📝 STEP 4: Finding all files in the extracted EPUB...');
+      // console.log('\n📝 STEP 4: Finding all files in the extracted EPUB...');
       const filesToTranslate = this.getFilesToTranslate(contentDirectory);
-      console.log(`📚 Found ${filesToTranslate.length} files to translate.`);
+      // console.log(`📚 Found ${filesToTranslate.length} files to translate.`);
       // console.log(`📚 Files to translate:`, filesToTranslate);
 
       // Step 5: Begin translating each file from where we left off using cache.
@@ -562,9 +639,6 @@ export class TranslationService {
           const file = filesToTranslate[i];
           const filePath = path.join(contentDirectory, file);
 
-          console.log(
-            `Processing file ${i + 1}/${filesToTranslate.length}: ${file} - ${new Date().toLocaleTimeString([], { hour12: false })}`
-          );
           const skipOrNew = await this.translateFile(filePath, targetLang, sourceLang);
         }
       } catch (error) {
@@ -578,13 +652,12 @@ export class TranslationService {
       console.log('\n📝 STEP 6: Creating new EPUB with proper structure using 7zip...');
       try {
         await this.execAsync(`"C:\\Program Files\\7-Zip\\7z.exe" a -tzip "${outputPath}" "${oldEpubDir}\\*" -mx=0`);
-        console.log('  Created EPUB using 7zip');
+        // console.log('  Created EPUB using 7zip');
       } catch (error) {
         console.error('  7zip failed to create EPUB:', error);
         throw new Error(`Failed to create EPUB with 7zip: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-
-      console.log(`\x1b[32m  EPUB repackaged successfully: ${outputPath}\x1b[0m\n\n`);
+      console.log(`\x1b[32m  EPUB repackaged successfully: ${path.basename(outputPath)}\x1b[0m\n\n`);
 
       // Rethrow error later after epub is rebuilt.
       if (erroredOut) {
@@ -604,6 +677,26 @@ export class TranslationService {
       // console.error('Error in translateEPUB method:', error);
       throw new Error(`Failed to translate full EPUB: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  private resolveSafeUploadPath(filename: string): string {
+    if (typeof filename !== 'string' || filename.trim() === '') {
+      throw new Error('Invalid filename');
+    }
+
+    if (path.basename(filename) !== filename) {
+      throw new Error('Invalid upload filename path');
+    }
+
+    const uploadsRoot = path.resolve(this.uploadsDir);
+    const resolved = path.resolve(this.uploadsDir, filename);
+    const prefix = `${uploadsRoot}${path.sep}`;
+
+    if (resolved !== uploadsRoot && !resolved.startsWith(prefix)) {
+      throw new Error('Resolved filename is outside uploads directory');
+    }
+
+    return resolved;
   }
 
   /**

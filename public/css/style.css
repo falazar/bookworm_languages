@@ -180,6 +180,15 @@ button:hover {
     display: flex;
     align-items: center;
     gap: 15px;
+    text-decoration: none;
+    color: inherit;
+}
+
+.book-card:visited,
+.book-card:hover,
+.book-card:active {
+    text-decoration: none;
+    color: inherit;
 }
 
 .book-card:hover {

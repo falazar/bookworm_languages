@@ -1,109 +1,111 @@
-
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title><%= title %></title>
-    <link rel="stylesheet" href="/css/tts.css">
-  </head>
-  <body>
-    <header>
-      <div class="header-left">
-        <div class="book-name"><code><%= typeof book !== 'undefined' ? book : '' %></code></div>
-      </div>
-      <div>
-        <a href="/books" class="btn">← Back to Books</a>
-      </div>
-    </header>
 
-    <div class="controls">
-      <label>
-        Chapter
-        <select id="docSelect"></select>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title><%= title %></title>
+  <link rel="stylesheet" href="/css/tts.css">
+</head>
+
+<body>
+  <header>
+    <div class="header-left">
+      <div class="book-name"><code><%= typeof book !== 'undefined' ? book : '' %></code></div>
+    </div>
+    <div>
+      <a href="/books" class="btn">← Back to Books</a>
+    </div>
+  </header>
+
+  <div class="controls">
+    <label>
+      Chapter
+      <select id="docSelect"></select>
+    </label>
+    <button id="settingsToggle" class="btn settings-toggle">Settings</button>
+
+    <div id="settingsPanel" class="settings-panel">
+      <label style="display:none">
+        Book
+        <select id="bookSelect"></select>
       </label>
-      <button id="settingsToggle" class="btn settings-toggle">Settings</button>
 
-      <div id="settingsPanel" class="settings-panel">
-        <label>
-          Show
-          <select id="showLang">
-            <option value="both">Both</option>
-            <option value="en">English only</option>
-            <option value="fr">French only</option>
-          </select>
-        </label>
-        <label style="display:none">
-          Book
-          <select id="bookSelect"></select>
-        </label>
-
-        <label>
-          Font Size
-          <input id="fontSize" type="range" min="15" max="26" step="1" value="17" />
-        </label>
-        <div class="break"></div>
-        <label>
-          English Voice
-          <select id="voiceSelectEn"></select>
-        </label>
-        <label>
-          French Voice
-          <select id="voiceSelectFr"></select>
-        </label>
-        <div class="break"></div>
-        <label>
-          English Rate
-          <input id="rateEn" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
-        </label>
-        <label>
-          French Rate
-          <input id="rateFr" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
-        </label>
-        <label>
-          Pitch
-          <input id="pitch" type="range" min="0.8" max="1.2" step="0.05" value="1.0" />
-        </label>
-        <button id="play">Play</button>
-        <button id="pause">Pause</button>
-        <button id="resume">Resume</button>
-        <button id="stop">Stop</button>
-      </div>
+      <label>
+        Show
+        <select id="showLang">
+          <option value="both">Both languages</option>
+          <option value="en">English only</option>
+          <option value="fr">French only</option>
+        </select>
+      </label>
+      <label>
+        Font Size
+        <input id="fontSize" type="range" min="15" max="26" step="1" value="17" />
+      </label>
+      <div class="break"></div>
+      <label>
+        English Voice
+        <select id="voiceSelectEn"></select>
+      </label>
+      <label>
+        French Voice
+        <select id="voiceSelectFr"></select>
+      </label>
+      <div class="break"></div>
+      <label>
+        English Rate
+        <input id="rateEn" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+      </label>
+      <label>
+        French Rate
+        <input id="rateFr" type="range" min="0.5" max="2.0" step="0.1" value="1.0" />
+      </label>
+      <label>
+        Pitch
+        <input id="pitch" type="range" min="0.8" max="1.2" step="0.05" value="1.0" />
+      </label>
+      <button id="play">Play</button>
+      <button id="pause">Pause</button>
+      <button id="resume">Resume</button>
+      <button id="stop">Stop</button>
     </div>
+  </div>
 
-    <div class="legend">
-      <span><span class="swatch fr"></span>French (FR)</span>
-      <span><span class="swatch en"></span>English (EN)</span>
-      <span>Currently playing is highlighted.</span>
+  <div class="legend">
+    <span><span class="swatch fr"></span>French (FR)</span>
+    <span><span class="swatch en"></span>English (EN)</span>
+    <span>Currently playing is highlighted.</span>
+  </div>
+
+  <section id="content">
+    <% paragraphs.forEach(function(p, idx) { %>
+    <div class="para" data-index="<%= idx %>" data-lang="<%= p.lang %>">
+      <span><%= p.text %></span>
     </div>
+    <% }) %>
+  </section>
+  <div style="margin-top: 16px;">
+    <button id="nextChapter" class="btn">Next Chapter →</button>
+  </div>
 
-    <section id="content">
-      <% paragraphs.forEach(function(p, idx) { %>
-        <div class="para" data-index="<%= idx %>" data-lang="<%= p.lang %>">
-          <span><%= p.text %></span>
-        </div>
-      <% }) %>
-    </section>
-    <div style="margin-top: 16px;">
-      <button id="nextChapter" class="btn">Next Chapter →</button>
-    </div>
+  <footer>
+    Tip: Open this page in Chrome/Edge to access high-quality voices. Use the voice list to pick a "Google" voice if available.
+  </footer>
 
-    <footer>
-      Tip: Open this page in Chrome/Edge to access high-quality voices. Use the voice list to pick a "Google" voice if available.
-    </footer>
+  <script>
+    // Server-provided data
+    window.TTS_DATA = {
+      books: <%- JSON.stringify(typeof books !== 'undefined' ? books : []) %>,
+      currentBook: <%- JSON.stringify(typeof book !== 'undefined' ? book : '') %>,
+      docs: <%- JSON.stringify(typeof docs !== 'undefined' ? docs : []) %>,
+      docLabels: <%- JSON.stringify(typeof docLabels !== 'undefined' ? docLabels : []) %>,
+      currentDoc: <%- JSON.stringify(typeof doc !== 'undefined' ? doc : '') %>,
+      paragraphData: <%- JSON.stringify(paragraphs || []) %>,
+      savedParagraphIndex: <%- JSON.stringify(typeof savedParagraphIndex !== 'undefined' ? savedParagraphIndex : 0) %>
+    };
+  </script>
+  <script src="/js/tts.js"></script>
+</body>
 
-    <script>
-      // Server-provided data
-      window.TTS_DATA = {
-        books: <%- JSON.stringify(typeof books !== 'undefined' ? books : []) %>,
-        currentBook: <%- JSON.stringify(typeof book !== 'undefined' ? book : '') %>,
-        docs: <%- JSON.stringify(typeof docs !== 'undefined' ? docs : []) %>,
-        docLabels: <%- JSON.stringify(typeof docLabels !== 'undefined' ? docLabels : []) %>,
-        currentDoc: <%- JSON.stringify(typeof doc !== 'undefined' ? doc : '') %>,
-        paragraphData: <%- JSON.stringify(paragraphs || []) %>,
-        savedParagraphIndex: <%- JSON.stringify(typeof savedParagraphIndex !== 'undefined' ? savedParagraphIndex : 0) %>
-      };
-    </script>
-    <script src="/js/tts.js"></script>
-  </body>
 </html>

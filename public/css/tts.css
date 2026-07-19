@@ -120,6 +120,30 @@ button {
 .para.hidden {
   display: none;
 }
+/* Peek: inline companion-language reveal on click */
+.para.para-peek {
+  position: relative;
+  opacity: 0.82;
+  border-style: dashed;
+  margin-top: 2px;
+  margin-bottom: 10px;
+  font-style: italic;
+}
+.peek-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  padding: 0 5px;
+  font-size: 13px;
+  line-height: 1.4;
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+}
+.peek-close:hover {
+  color: #fff;
+}
 /* Tint by language on dark */
 .para[data-lang='fr'] {
   border-left-color: #d83b01;

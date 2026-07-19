@@ -40,6 +40,12 @@ const currentDoc = window.TTS_DATA.currentDoc;
 const paragraphData = window.TTS_DATA.paragraphData;
 const savedParagraphIndex = window.TTS_DATA.savedParagraphIndex;
 
+// Detect the second (non-English) language from the paragraph data so the
+// logic works generically for French, Spanish, German, etc.
+const firstLang = 'en';
+const _secondLangItem = paragraphData.find(p => p.lang && p.lang !== firstLang);
+const secondLang = _secondLangItem ? _secondLangItem.lang : null;
+
 const bookSelect = document.getElementById('bookSelect');
 const docSelect = document.getElementById('docSelect');
 const voiceSelectEn = document.getElementById('voiceSelectEn');
@@ -76,6 +82,8 @@ let currentIndex = -1;
 let userPaused = false;
 // Track currently playing paragraph index
 let currentPlayingIdx = -1;
+// Track the last-played second-language paragraph so it stays bolded while the first language is reading
+let lastSecondLangIdx = -1;
 // Suppress synthetic click after touch to avoid double-handling
 let lastTouchTs = 0;
 // Track if we're actively playing (not stopped by user)
@@ -419,42 +427,31 @@ try {
 }
 applyLanguageFilter();
 
-// Change visibility and reset playback when filter changes
+// Change visibility only — TTS reads all languages regardless of display filter
 showLangSelect.addEventListener('change', () => {
   try {
     if (localStorageAvailable) localStorage.setItem(LS.showLang, showLangSelect.value);
   } catch (e) {
     console.warn('[TTS] localStorage set error (showLang):', e);
   }
+  removePeek();
   applyLanguageFilter();
-  isActivePlaying = false;
-  window.speechSynthesis.cancel();
-  currentIndex = -1;
-  paras.forEach(el => {
-    el.classList.remove('playing');
-    el.classList.remove('paired');
-  });
 });
 
 function speakParagraphs(startIdx = 0) {
-  // Build queue from server-provided paragraphData with language hints and current visibility filter
-  const val = showLangSelect.value || 'both';
+  // Always queue all paragraphs — display visibility doesn't affect TTS
   let items = paragraphData.map((item, idx) => ({
     text: String(item.text || ''),
     lang: String(item.lang || 'en'),
     idx,
   }));
-  if (val === 'en') items = items.filter(it => it.lang === 'en');
-  else if (val === 'fr') items = items.filter(it => it.lang === 'fr');
   queue = items;
   // Map DOM index to position in filtered queue
   let startPos = queue.findIndex(it => it.idx === startIdx);
   if (startPos < 0) startPos = 0;
   currentIndex = startPos;
   if (DEBUG_TTS)
-    console.log(
-      `[TTS] speakParagraphs startIdx=${startIdx} filter=${val} queueLen=${queue.length} startPos=${startPos}`
-    );
+    console.log(`[TTS] speakParagraphs startIdx=${startIdx} queueLen=${queue.length} startPos=${startPos}`);
   isActivePlaying = true;
   requestWakeLock().catch(() => {});
   speakNext();
@@ -465,23 +462,24 @@ function markPlaying(idx) {
     currentPlayingIdx = idx;
     const el = paras[idx];
     if (el) {
-      const current = paragraphData[idx];
-      const currentLang = current && current.lang;
-
-      // Only clear and highlight for French paragraphs
-      if (currentLang === 'fr') {
-        paras.forEach(el => {
-          el.classList.remove('playing');
-        });
-        el.classList.add('playing');
-
-        // Scroll to the previous visible paragraph for each French section
-        let prevIdx = idx - 1;
-        while (prevIdx >= 0 && paras[prevIdx] && paras[prevIdx].classList.contains('hidden')) prevIdx--;
-        const scrollToIdx = prevIdx >= 0 ? prevIdx : idx;
-        if (scrollToIdx >= 0) {
-          window.location.hash = '#p' + scrollToIdx;
+      paras.forEach(p => p.classList.remove('playing'));
+      el.classList.add('playing');
+      const lang = paragraphData[idx] && paragraphData[idx].lang;
+      if (secondLang && lang === secondLang) {
+        // New second-language paragraph: clear bold from previous, update tracker
+        if (lastSecondLangIdx >= 0 && lastSecondLangIdx !== idx && paras[lastSecondLangIdx]) {
+          paras[lastSecondLangIdx].classList.remove('paired');
         }
+        lastSecondLangIdx = idx;
+      } else if (lastSecondLangIdx >= 0 && paras[lastSecondLangIdx]) {
+        // First-language paragraph: keep the last second-language paragraph bolded
+        paras[lastSecondLangIdx].classList.add('paired');
+      }
+      // Scroll to this paragraph if visible, else nearest visible one above
+      let scrollToIdx = idx;
+      while (scrollToIdx >= 0 && paras[scrollToIdx] && paras[scrollToIdx].classList.contains('hidden')) scrollToIdx--;
+      if (scrollToIdx >= 0) {
+        window.location.hash = '#p' + scrollToIdx;
       }
     }
   } catch (e) {
@@ -538,6 +536,7 @@ function speakNext() {
     if (currentIndex + 1 >= queue.length) {
       // Finished last paragraph; clear playing state and stop
       isActivePlaying = false;
+      lastSecondLangIdx = -1;
       paras.forEach(el => {
         el.classList.remove('playing');
         el.classList.remove('paired');
@@ -577,6 +576,7 @@ function speakNext() {
 // This prevents cross-contamination between different TTS-enabled pages.
 
 btnPlay.addEventListener('click', () => {
+  removePeek();
   isActivePlaying = false; // Clear flag first
   window.speechSynthesis.cancel(); // Clear any paused state from other pages
   requestWakeLock().catch(() => {});
@@ -594,7 +594,9 @@ btnResume.addEventListener('click', () => {
   window.speechSynthesis.resume();
 });
 btnStop.addEventListener('click', () => {
+  removePeek();
   isActivePlaying = false;
+  lastSecondLangIdx = -1;
   window.speechSynthesis.cancel();
   currentIndex = -1;
   paras.forEach(el => {
@@ -604,16 +606,70 @@ btnStop.addEventListener('click', () => {
   releaseWakeLock();
 });
 
+// ── Peek feature ─────────────────────────────────────────────────────────────
+// When one language is hidden and you click a paragraph, the paired (hidden)
+// translation is revealed inline just below the clicked paragraph.
+let peekEl = null;
+
+function removePeek() {
+  if (peekEl) {
+    peekEl.remove();
+    peekEl = null;
+  }
+}
+
+function showPeek(clickedIdx) {
+  removePeek();
+  const clickedPara = paras[clickedIdx];
+  if (!clickedPara) return;
+
+  const clickedLang = paragraphData[clickedIdx] && paragraphData[clickedIdx].lang;
+  // Find the adjacent paired paragraph (opposite language)
+  let pairIdx = -1;
+  if (
+    clickedIdx + 1 < paras.length &&
+    paragraphData[clickedIdx + 1] &&
+    paragraphData[clickedIdx + 1].lang !== clickedLang
+  ) {
+    pairIdx = clickedIdx + 1;
+  } else if (
+    clickedIdx - 1 >= 0 &&
+    paragraphData[clickedIdx - 1] &&
+    paragraphData[clickedIdx - 1].lang !== clickedLang
+  ) {
+    pairIdx = clickedIdx - 1;
+  }
+  if (pairIdx < 0) return;
+
+  // Only show peek if the paired paragraph is currently hidden
+  if (!paras[pairIdx] || !paras[pairIdx].classList.contains('hidden')) return;
+
+  const pairData = paragraphData[pairIdx];
+  peekEl = document.createElement('div');
+  peekEl.className = 'para para-peek';
+  peekEl.setAttribute('data-lang', pairData.lang);
+  peekEl.innerHTML = '<button class="peek-close" title="Close">&times;</button>' + '<span>' + pairData.text + '</span>';
+  peekEl.querySelector('.peek-close').addEventListener('click', e => {
+    e.stopPropagation();
+    removePeek();
+  });
+  clickedPara.insertAdjacentElement('afterend', peekEl);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Click a paragraph to start reading from it
 const contentEl = document.getElementById('content');
 contentEl.addEventListener('click', ev => {
   // Ignore synthetic clicks that immediately follow a touch
   if (Date.now() - lastTouchTs < 400) return;
   const target = ev.target;
-  const para = target && target.closest ? target.closest('.para') : null;
+  // Exclude clicks on peek elements (close button handled separately)
+  const para = target && target.closest ? target.closest('.para:not(.para-peek)') : null;
   if (!para) return;
   const idx = Number(para.getAttribute('data-index'));
   if (DEBUG_TTS) console.log(`[TTS] click paragraph idx=${idx} currentPlayingIdx=${currentPlayingIdx}`);
+  // Always update the peek for the clicked paragraph
+  showPeek(idx);
   // If clicking the currently playing paragraph, toggle pause/resume
   if (idx === currentPlayingIdx) {
     const s = window.speechSynthesis;

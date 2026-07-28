@@ -165,8 +165,7 @@ export class TranslationService {
         // console.log('✅ Delay complete, continuing to the next file...\n');
       }
     } catch (error) {
-      // console.error(`Error translating file ${filePath}:`, error);
-      console.error(`Error translating file ${filePath}`);
+      console.error(`\x1b[31mError translating file ${path.basename(filePath)}\x1b[0m`);
       throw error;
     }
 
@@ -236,8 +235,7 @@ export class TranslationService {
     const paragraphs = $('p')
       .map((_, el) => $(el).text().trim())
       .get();
-    const paragraphSeparator = '[[[__BW_PSEP_0001__]]]';
-    const textOnly = paragraphs.join(` ${paragraphSeparator} `);
+    const textOnly = this.joinParagraphsForTranslation(paragraphs);
 
     // For testing we can turn on or off cache.
     let useCache = true;
@@ -246,7 +244,7 @@ export class TranslationService {
       // console.log('\n\x1b[33mDEBUG: Skipping cache for testing purposes\x1b[0m');
     }
 
-    let translatedChunk = '';
+    let translatedLines: string[] = [];
     let wasCached = false;
     const originalLines = paragraphs;
     if (originalLines.length <= 1) {
@@ -256,34 +254,20 @@ export class TranslationService {
       const translatedResult = await this.translateParagraphsWithRetry(
         textOnly,
         originalLines,
-        paragraphSeparator,
         targetLang,
         sourceLang,
         useCache
       );
-      translatedChunk = translatedResult.translatedChunk;
+      translatedLines = translatedResult.translatedLines;
       wasCached = translatedResult.wasCached;
-    }
 
-    // Split translated chunk using explicit separator token for stable paragraph boundaries.
-    let translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
-
-    // Show length of both original and translated lines in purple
-    if (originalLines.length !== translatedLines.length) {
-      console.log(
-        `\x1b[31mWARN: 2 Line count mismatch between original ${originalLines.length} and translated ${translatedLines.length}.\x1b[0m`
-      );
-      console.log(`\x1b[35m\nDEBUG: 2 ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-      console.log(`\x1b[35mDEBUG: 2 TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
-    }
-
-    if (!wasCached) {
-      // console.log(
-      //   `\x1b[35m\nDEBUG: STARTING TO MERGE ORIGINAL:${originalLines.length} AND TRANSLATED:${translatedLines.length} LINES...\x1b[0m`
-      // );
-      // console.log(`-------------------------------------------------------`);
-      // console.log('\x1b[35moriginalLines:', originalLines);
-      // console.log('\x1b[35mtranslatedLines:', translatedLines);
+      // Markers carry their paragraph index, so a lost boundary names exactly which paragraph it cost us.
+      if (translatedResult.missing.length > 0) {
+        console.log(
+          `\x1b[31mWARN: 2 ${translatedResult.missing.length} of ${originalLines.length} paragraphs unresolved.\x1b[0m`
+        );
+        console.log(`\x1b[35mDEBUG: 2 UNRESOLVED PARAGRAPH INDEXES: ${translatedResult.missing.join(', ')}\x1b[0m`);
+      }
     }
 
     const rebuiltChunk = this.rebuildTranslatedChunk(header, originalLines, translatedLines);
@@ -291,42 +275,37 @@ export class TranslationService {
   }
 
   /**
-   * Translates paragraph text and retries without cache if separator counts do not match.
+   * Translates paragraph text and retries without cache if any numbered marker went missing.
+   * Returns one entry per original paragraph, aligned by marker index.
    */
   private async translateParagraphsWithRetry(
     textOnly: string,
     originalLines: string[],
-    paragraphSeparator: string,
     targetLang: string,
     sourceLang: string,
     useCache: boolean
-  ): Promise<{ translatedChunk: string; wasCached: boolean }> {
-    const { translatedText, wasCached: chunkWasCached } = await this.googleTranslateClient.translateText(
+  ): Promise<{ translatedLines: string[]; wasCached: boolean; missing: number[] }> {
+    const { translatedText, wasCached } = await this.googleTranslateClient.translateText(
       textOnly,
       targetLang,
       sourceLang,
       useCache
     );
-    let translatedChunk = translatedText;
-    let wasCached = chunkWasCached;
+    const firstAttempt = this.alignTranslatedParagraphs(translatedText, originalLines.length);
     // console.log(`[CHUNK DEBUG] translateText returned wasCached=${wasCached}`);
     if (wasCached) {
-      return { translatedChunk, wasCached };
+      return { translatedLines: firstAttempt.lines, wasCached, missing: firstAttempt.missing };
     }
 
-    // Check that we match:
-    // Split translated chunk using explicit separator token for stable paragraph boundaries.
-    const translatedLines = translatedChunk.split(paragraphSeparator).map(line => line.trim());
-
-    // If size of both match return now.
-    if (originalLines.length === translatedLines.length) {
-      return { translatedChunk, wasCached };
+    // Every marker came back, so every paragraph is placed.
+    if (firstAttempt.missing.length === 0) {
+      return { translatedLines: firstAttempt.lines, wasCached, missing: [] };
     }
 
-    // If these two dont match, retry again.   This fixes most but not all.
+    // The translator dropped some markers. Retry once; this fixes most but not all.
     console.log(`\x1b[35m\nDEBUG: ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-    console.log(`\x1b[35mDEBUG: TRANSLATED LINES: ${translatedLines.length}\x1b[0m`);
-    console.log('\x1b[31mWARN: Line count mismatch between original and translated.\x1b[0m');
+    console.log(`\x1b[35mDEBUG: RESOLVED LINES: ${originalLines.length - firstAttempt.missing.length}\x1b[0m`);
+    console.log(`\x1b[31mWARN: Lost markers for paragraph indexes: ${firstAttempt.missing.join(', ')}\x1b[0m`);
 
     // Second chance.
     const { translatedText: retriedTranslatedText, wasCached: retriedWasCached } =
@@ -336,15 +315,85 @@ export class TranslationService {
         sourceLang,
         false // FALSE HERE! retry.
       );
-    translatedChunk = retriedTranslatedText;
-    wasCached = retriedWasCached;
-    // Split translated chunk using explicit separator token for stable paragraph boundaries.
-    const translatedLines2 = translatedChunk.split(paragraphSeparator).map(line => line.trim());
-    console.log(`[CHUNK DEBUG] second chance translateText returned wasCached=${wasCached}`);
-    console.log(`\x1b[35m\nDEBUG: 2nd ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
-    console.log(`\x1b[35mDEBUG: 2nd TRANSLATED LINES: ${translatedLines2.length}\x1b[0m`);
+    const secondAttempt = this.alignTranslatedParagraphs(retriedTranslatedText, originalLines.length);
+    console.log(`[CHUNK DEBUG] second chance translateText returned wasCached=${retriedWasCached}`);
 
-    return { translatedChunk, wasCached };
+    // Both attempts translate the same text, so fill each gap from whichever attempt resolved it.
+    const stillMissingFirst = new Set(firstAttempt.missing);
+    const mergedLines = firstAttempt.lines.map((line, index) =>
+      stillMissingFirst.has(index) ? secondAttempt.lines[index] : line
+    );
+    const missing = firstAttempt.missing.filter(index => secondAttempt.missing.includes(index));
+    console.log(`\x1b[35m\nDEBUG: 2nd ORIGINAL LINES: ${originalLines.length}\x1b[0m`);
+    console.log(`\x1b[35mDEBUG: 2nd RESOLVED LINES: ${originalLines.length - missing.length}\x1b[0m`);
+
+    return { translatedLines: mergedLines, wasCached: retriedWasCached, missing };
+  }
+
+  /**
+   * Builds the delimiter placed in front of a paragraph before it is sent to the translator.
+   * The index makes every marker unique: the translator deletes runs of identical non-linguistic
+   * tokens, but distinct numbered ones survive, and a survivor tells us which paragraph follows it.
+   * @param index - Zero-based paragraph position within the chunk
+   */
+  private buildParagraphMarker(index: number): string {
+    return `[[[__BW_PSEP_${String(index).padStart(4, '0')}__]]]`;
+  }
+
+  /**
+   * Matches paragraph markers in translated output. Deliberately tolerant of the ways the translator
+   * reformats them (case, spacing, dropped brackets or underscores); only BW, PSEP and the digits
+   * have to survive for us to recover the index.
+   */
+  private paragraphMarkerPattern(): RegExp {
+    return /\[{0,3}\s*_{0,2}\s*BW[\s_]*PSEP[\s_]*(\d{1,6})[\s_]*\]{0,3}/gi;
+  }
+
+  /**
+   * Joins paragraphs into a single translation request, each preceded by its numbered marker.
+   * @param paragraphs - Original paragraph text lines
+   * @returns string - Marker-delimited text to translate
+   */
+  private joinParagraphsForTranslation(paragraphs: string[]): string {
+    return paragraphs.map((paragraph, index) => `${this.buildParagraphMarker(index)} ${paragraph}`).join(' ');
+  }
+
+  /**
+   * Splits translated text back into one entry per original paragraph, keyed on marker index rather
+   * than on marker count. A dropped marker therefore leaves that single slot empty instead of
+   * shifting every later paragraph out of sync.
+   * @param translatedText - Raw translated text still containing the numbered markers
+   * @param expectedCount - Number of original paragraphs sent
+   * @returns Aligned lines plus the indexes no marker was recovered for
+   */
+  private alignTranslatedParagraphs(
+    translatedText: string,
+    expectedCount: number
+  ): { lines: string[]; missing: number[] } {
+    const slots: (string | null)[] = new Array(expectedCount).fill(null);
+    const markers = [...translatedText.matchAll(this.paragraphMarkerPattern())];
+
+    for (let position = 0; position < markers.length; position++) {
+      const marker = markers[position];
+      const index = Number.parseInt(marker[1], 10);
+      const textStart = (marker.index ?? 0) + marker[0].length;
+      const nextMarker = markers[position + 1];
+      const textEnd = nextMarker ? (nextMarker.index ?? translatedText.length) : translatedText.length;
+
+      // Ignore out-of-range or duplicated indexes the translator may have invented.
+      if (index >= 0 && index < expectedCount && slots[index] === null) {
+        slots[index] = translatedText.slice(textStart, textEnd).trim();
+      }
+    }
+
+    const missing: number[] = [];
+    slots.forEach((slot, index) => {
+      if (slot === null) {
+        missing.push(index);
+      }
+    });
+
+    return { lines: slots.map(slot => slot ?? ''), missing };
   }
 
   /**
@@ -367,19 +416,16 @@ export class TranslationService {
         '<body class="calibre">\n';
     }
 
-    // PART 2: Fill in body p tags.
-    let originalIndex = 0;
-    let translatedIndex = 0;
-    while (originalIndex < 1000 && (originalIndex < originalLines.length || translatedIndex < translatedLines.length)) {
-      const originalLine = originalIndex < originalLines.length ? originalLines[originalIndex] : '';
-      const translatedLine = translatedIndex < translatedLines.length ? translatedLines[translatedIndex] : '';
+    // PART 2: Fill in body p tags. translatedLines is already aligned to originalLines by marker
+    // index, so pair strictly by position: an unresolved paragraph leaves a blank translation
+    // rather than pulling every later paragraph out of sync.
+    for (let index = 0; index < originalLines.length; index++) {
+      const originalLine = originalLines[index];
+      const translatedLine = translatedLines[index] ?? '';
       returnText += '<p class="translated">' + translatedLine + '</p>\n';
       const italicLine = '<p style="font-style: italic;">';
       returnText += italicLine + originalLine + '</p>\n\n';
-
-      translatedIndex++; // Advance translated counter
-      originalIndex++; // Advance even if empty
-    } // while loop
+    } // for loop
 
     return returnText;
   }

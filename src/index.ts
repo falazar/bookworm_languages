@@ -284,7 +284,7 @@ app.post('/translate-book', async (req, res) => {
       const requestedSourceLanguage = typeof req.body?.sourceLanguage === 'string' ? req.body.sourceLanguage : 'auto';
 
       console.warn(
-        `[TRANSLATION EXPECTED] extractor miss; book=${requestedFilename}; source=${requestedSourceLanguage}; target=${requestedTargetLanguage}`
+        `\x1b[31m[TRANSLATION EXPECTED] extractor miss; book=${requestedFilename}; source=${requestedSourceLanguage}; target=${requestedTargetLanguage}\x1b[0m`
       );
 
       return res.status(500).json({

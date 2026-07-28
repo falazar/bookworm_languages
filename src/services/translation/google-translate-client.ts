@@ -39,88 +39,99 @@ export class GoogleTranslateClient {
     useCache: boolean = true
   ): Promise<{ translatedText: string; wasCached: boolean }> {
     const debugLogs = true;
+    const incomingLength = text.length;
 
-    // Debug mode - return placeholder text
-    if (this.isDebugMode()) {
-      console.log('DEBUG MODE: Returning placeholder translation');
-      return { translatedText: 'FAKE TRANSLATED TEXT', wasCached: false };
-    }
-
-    // Check cache first
-    const cacheKey = this.cache.getCacheKey(text, targetLang, sourceLang);
-    if (useCache) {
-      const cached = this.cache.getFromCache(cacheKey);
-      if (cached) {
-        return { translatedText: cached, wasCached: true };
+    try {
+      // Debug mode - return placeholder text
+      if (this.isDebugMode()) {
+        console.log('DEBUG MODE: Returning placeholder translation');
+        return { translatedText: 'FAKE TRANSLATED TEXT', wasCached: false };
       }
+
+      // Check cache first
+      const cacheKey = this.cache.getCacheKey(text, targetLang, sourceLang);
+      if (useCache) {
+        const cached = this.cache.getFromCache(cacheKey);
+        if (cached) {
+          return { translatedText: cached, wasCached: true };
+        }
+      }
+
+      console.log('  🔄 Fetching new translation...');
+
+      // URL encode the text
+      // Replace smart quotes and special chars with ASCII
+      text = text.replace(/\u2019/g, "'");
+      text = text.replace(/\u2018/g, "'");
+      text = text.replace(/\u201c/g, '"');
+      text = text.replace(/\u201d/g, '"');
+      text = text.replace(/\u2014/g, '--');
+      text = text.replace(/\u2013/g, '-');
+      text = text.replace(/“/g, ' "');
+      text = text.replace(/”/g, '" ');
+      text = text.replace(/—/g, '--');
+      text = text.replace(/’/g, "'");
+
+      // Check for an over limit size maybe here?
+      if (text.length > 5000) {
+        console.log('DEBUG: Text length:', text.length);
+        console.log('ERROR: Text is too long to translate, debug test shortening.');
+        text = text.substring(0, 5000);
+      }
+
+      const encodedText = encodeURIComponent(text);
+      if (debugLogs) {
+        // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
+        // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
+      }
+
+      // Build the translation URL
+      const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
+      if (debugLogs) {
+        // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
+      }
+
+      const translation = await this.fetchTranslationPageData(url);
+      if (!translation) {
+        throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
+      }
+
+      // First decode URL encoding, then HTML entities
+      let decodedTranslation = translation
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
+        .replace(/&nbsp;/g, ' ')
+        .replace(/&apos;/g, "'")
+        .replace(/&mdash;/g, '—')
+        .replace(/&ndash;/g, '–')
+        .replace(/&hellip;/g, '…')
+        .replace(/&amp;/g, '&')
+        .replace(/&[#\w]+;/g, '');
+
+      // Fix common translation issues
+      decodedTranslation = decodedTranslation
+        .replace(/epub: type/g, 'epub:type')
+        .replace(/aria-label = /g, 'aria-label=')
+        .replace(/id = /g, 'id=')
+        .replace(/role = /g, 'role=');
+
+      // Save to cache before returning.
+      this.cache.saveToCache(cacheKey, decodedTranslation);
+
+      return { translatedText: decodedTranslation, wasCached: false };
+    } catch (error) {
+      // Log with request context, then let the caller decide whether to retry or abort.
+      const reason = error instanceof Error ? error.message : 'Unknown error';
+      console.warn(
+        `\x1b[31mWARN: translateText failed; source=${sourceLang}; target=${targetLang}; chars=${incomingLength}; reason=${reason}\x1b[0m`
+      );
+      const stack = error instanceof Error && error.stack ? error.stack : String(error);
+      console.warn(`\x1b[31m${stack}\x1b[0m`);
+      throw error;
     }
-
-    console.log('  🔄 Fetching new translation...');
-
-    // URL encode the text
-    text = text.replace(/”/g, '"');
-    // Replace smart quotes and special chars with ASCII
-    text = text.replace('\u2019', "'");
-    text = text.replace('\u2018', "'");
-    text = text.replace('\u201c', '"');
-    text = text.replace('\u201d', '"');
-    text = text.replace('\u2014', '--');
-    text = text.replace('\u2013', '-');
-    text = text.replace('“', ' "');
-    text = text.replace('”', '" ');
-    text = text.replace('—', '--');
-    text = text.replace('’', "'");
-
-    // Check for an over limit size maybe here?
-    if (text.length > 5000) {
-      console.log('DEBUG: Text length:', text.length);
-      console.log('ERROR: Text is too long to translate, debug test shortening.');
-      text = text.substring(0, 5000);
-    }
-
-    const encodedText = encodeURIComponent(text);
-    if (debugLogs) {
-      // console.log('\n\x1b[33mDEBUG: BEFORE ENCODING TEXT: ', text, '\x1b[0m');
-      // console.log('\nDEBUG: AFTER ENCODING TEXT:', encodedText);
-    }
-
-    // Build the translation URL
-    const url = `${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=${encodedText}&op=translate`;
-    if (debugLogs) {
-      // console.log(`\nDEBUG: url=${this.baseUrl}/?sl=${sourceLang}&tl=${targetLang}&text=***`);
-    }
-
-    const translation = await this.fetchTranslationPageData(url);
-    if (!translation) {
-      throw new Error('Could not extract translation from response - check temp_translated.html for debugging');
-    }
-
-    // First decode URL encoding, then HTML entities
-    let decodedTranslation = translation
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&#x27;/g, "'")
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&apos;/g, "'")
-      .replace(/&mdash;/g, '—')
-      .replace(/&ndash;/g, '–')
-      .replace(/&hellip;/g, '…')
-      .replace(/&amp;/g, '&')
-      .replace(/&[#\w]+;/g, '');
-
-    // Fix common translation issues
-    decodedTranslation = decodedTranslation
-      .replace(/epub: type/g, 'epub:type')
-      .replace(/aria-label = /g, 'aria-label=')
-      .replace(/id = /g, 'id=')
-      .replace(/role = /g, 'role=');
-
-    // Save to cache before returning.
-    this.cache.saveToCache(cacheKey, decodedTranslation);
-
-    return { translatedText: decodedTranslation, wasCached: false };
   }
 
   /**

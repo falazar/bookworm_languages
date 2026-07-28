@@ -752,6 +752,15 @@ window.addEventListener('load', () => {
       }
 
       console.log('[TTS] Positioning to paragraph:', targetIndex);
+      // If the target paragraph is hidden, advance to the next visible one
+      while (
+        targetIndex >= 0 &&
+        targetIndex < paras.length &&
+        paras[targetIndex] &&
+        paras[targetIndex].classList.contains('hidden')
+      ) {
+        targetIndex++;
+      }
       if (targetIndex >= 0 && targetIndex < paras.length) {
         // Scroll to and highlight the target paragraph
         const el = paras[targetIndex];

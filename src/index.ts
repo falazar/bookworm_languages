@@ -648,8 +648,8 @@ function isSafeDocPath(docPath: string): boolean {
   if (normalized.includes('..')) return false;
   // Must not start with / or \ (no absolute paths)
   if (normalized.startsWith('/') || normalized.startsWith('\\')) return false;
-  // Only allow forward slashes, alphanumeric, dash, underscore, dot
-  if (!/^[a-zA-Z0-9._\/-]+$/.test(normalized)) return false;
+  // Only allow safe filename characters (spaces and commas are valid in EPUB filenames)
+  if (!/^[a-zA-Z0-9._\/\-, ]+$/.test(normalized)) return false;
   return true;
 }
 

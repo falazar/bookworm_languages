@@ -564,7 +564,9 @@ export class TranslationService {
   // Returns the list of chapter files to translate from a content directory
   private getFilesToTranslate(contentDirectory: string): string[] {
     // Read all candidate files
-    let filesToTranslate = fs.readdirSync(contentDirectory).filter(f => f.endsWith('.xhtml') || f.endsWith('.html'));
+    let filesToTranslate = fs
+      .readdirSync(contentDirectory)
+      .filter(f => f.endsWith('.xhtml') || f.endsWith('.html') || f.endsWith('.htm'));
 
     // Skip known non-content file
     if (filesToTranslate.includes('part0000_split_000.html')) {
@@ -583,7 +585,10 @@ export class TranslationService {
     }
 
     if (filesToTranslate.length === 0) {
-      console.error('❌ No files to translate found');
+      const allFiles = fs.readdirSync(contentDirectory);
+      console.error(`❌ No translatable files found in: ${contentDirectory}`);
+      console.error(`   Directory contains ${allFiles.length} file(s): ${allFiles.join(', ') || '(empty)'}`);
+      console.error('   Expected extensions: .htm, .html, .xhtml');
       throw new Error('No files to translate found');
     }
 

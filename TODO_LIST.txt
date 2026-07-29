@@ -55,15 +55,6 @@ ADDITIONAL ENHANCES:
 - [ ] Add Docker support
 - [ ] Implement CI/CD pipeline
 
-TRANSLATION RELIABILITY:
-- [ ] Replace the blind 35s sleep with polling.
-      Note the ordering in google-translate-client.ts:201-209: extraction happens
-      BEFORE the sleep, so the 35s buys you nothing but throttling -- it was luck
-      that networkidle2 sufficed here.
-      Poll until the target-language data-text stops changing (~2-4s typically,
-      cap ~20s), then apply a deliberate inter-request delay for rate-limiting.
-      Order-of-magnitude speedup, which is what makes bisection viable.
-
 DEVELOPMENT COMMANDS:
 - npm run dev     - Start development server with auto-reload
 - npm run build   - Build TypeScript to JavaScript

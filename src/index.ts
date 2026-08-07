@@ -198,13 +198,48 @@ app.get('/books', (req, res) => {
   const booksWithCounts = books.map(b => {
     const epubPath = path.join(UPLOADS_DIR, b.filename);
     const chapterCount = readerService.getChapterCount(epubPath);
-    const coverDataUrl = readerService.getCoverDataUrl(epubPath);
-    return { ...b, chapterCount, coverDataUrl };
+    return { ...b, chapterCount };
   });
   res.render('books', {
     title: 'Books',
     books: booksWithCounts,
   });
+});
+
+// Stream EPUB cover image for Books cards.
+app.get('/books/cover/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    if (!isSafeFilename(filename)) {
+      return res.status(400).send('Invalid filename');
+    }
+
+    const epubPath = path.join(UPLOADS_DIR, filename);
+    if (!fs.existsSync(epubPath)) {
+      return res.status(404).send('File not found');
+    }
+
+    const coverDataUrl = readerService.getCoverDataUrl(epubPath);
+    if (!coverDataUrl) {
+      return res.status(404).send('Cover not found');
+    }
+
+    const m = coverDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+    if (!m) {
+      return res.status(500).send('Invalid cover data');
+    }
+
+    const mime = m[1];
+    const base64 = m[2];
+    const buffer = Buffer.from(base64, 'base64');
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.send(buffer);
+  } catch (error) {
+    console.error('[BOOKS] Error serving cover:', error);
+    return res.status(500).send('Error loading cover');
+  }
 });
 
 app.post('/upload', upload.single('epubFile'), (req, res) => {
@@ -583,9 +618,9 @@ app.post('/save-progress', (req, res) => {
     return res.status(400).json({ error: 'Book, doc, and paragraphIndex required' });
   }
 
-  console.log('[SERVER] Saving progress:', { book, doc, paragraphIndex });
+  //console.log('[SERVER] Saving progress:', { book, doc, paragraphIndex });
   const progress = loadProgress();
-  console.log('[SERVER] Current progress before save:', JSON.stringify(progress, null, 2));
+  //console.log('[SERVER] Current progress before save:', JSON.stringify(progress, null, 2));
 
   // Store only the last read chapter per book
   progress[book] = {
@@ -594,7 +629,7 @@ app.post('/save-progress', (req, res) => {
   };
 
   saveProgress(progress);
-  console.log('[SERVER] Progress saved successfully, new state:', JSON.stringify(progress[book], null, 2));
+  // console.log('[SERVER] Progress saved successfully, new state:', JSON.stringify(progress[book], null, 2));
 
   res.json({ success: true });
 });

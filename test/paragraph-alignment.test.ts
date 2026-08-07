@@ -57,6 +57,34 @@ describe('numbered paragraph markers', () => {
     expect(lines.slice(4)).toEqual(['fr4', 'fr5', 'fr6', 'fr7', 'fr8', 'fr9']);
   });
 
+  /**
+   * Regression for `UNRESOLVED PARAGRAPH INDEXES: 0` seen on a 13-paragraph chunk. The leading
+   * marker is the one the translator strips most often, and text ahead of the first surviving
+   * marker used to be skipped entirely, silently dropping that paragraph's translation.
+   */
+  it('claims text before the first surviving marker for paragraph 0', () => {
+    const service = internals();
+    const marker = (index: number) => service.buildParagraphMarker(index);
+    // Marker 0 deleted; the translation of paragraph 0 now leads the string.
+    const translated = `fr0 ${marker(1)} fr1 ${marker(2)} fr2`;
+
+    const { lines, missing } = service.alignTranslatedParagraphs(translated, 3);
+
+    expect(missing).toEqual([]);
+    expect(lines).toEqual(['fr0', 'fr1', 'fr2']);
+  });
+
+  it('does not let leading text overwrite a marker 0 that arrived out of order', () => {
+    const service = internals();
+    const marker = (index: number) => service.buildParagraphMarker(index);
+    const translated = `stray ${marker(1)} fr1 ${marker(0)} fr0`;
+
+    const { lines, missing } = service.alignTranslatedParagraphs(translated, 2);
+
+    expect(missing).toEqual([]);
+    expect(lines).toEqual(['fr0', 'fr1']);
+  });
+
   it('recovers indexes from markers the translator reformatted', () => {
     const service = internals();
     const translated = '[[[__BW_PSEP_0000__]]] zero [[ bw psep 1 ]] one BW_PSEP_2 two';

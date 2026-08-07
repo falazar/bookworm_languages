@@ -53,6 +53,15 @@ textarea {
 input[type='range'] {
   min-width: 220px;
 }
+input[type='number'] {
+  width: 88px;
+  padding: 6px 8px;
+  font-size: 14px;
+  background: #1c1f29;
+  color: #f0f0f0;
+  border: 1px solid #444;
+  border-radius: 6px;
+}
 /* Unified dropdown styling */
 select {
   display: inline-block;
@@ -97,6 +106,17 @@ button {
 }
 .settings-panel.open {
   display: flex;
+}
+.daily-goal-status {
+  width: fit-content;
+  max-width: min(560px, 92vw);
+  align-self: flex-start;
+  font-size: 13px;
+  color: #b9d6ff;
+  background: rgba(28, 41, 68, 0.55);
+  border: 1px solid #2f4668;
+  border-radius: 6px;
+  padding: 8px 10px;
 }
 
 .para {

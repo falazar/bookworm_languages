@@ -386,6 +386,17 @@ export class TranslationService {
       }
     }
 
+    // The leading marker is the one the translator strips most often, and text ahead of the first
+    // surviving marker can only belong to the first paragraph. Claim it rather than discard it:
+    // unlike a mid-text drop, which merges onto the previous paragraph, this text has no other home.
+    // Only when nothing else claimed slot 0, so a reordered marker cannot be overwritten.
+    if (expectedCount > 0 && slots[0] === null && markers.length > 0) {
+      const leadingText = translatedText.slice(0, markers[0].index ?? 0).trim();
+      if (leadingText !== '') {
+        slots[0] = leadingText;
+      }
+    }
+
     const missing: number[] = [];
     slots.forEach((slot, index) => {
       if (slot === null) {

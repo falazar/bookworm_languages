@@ -46,6 +46,18 @@ const firstLang = 'en';
 const _secondLangItem = paragraphData.find(p => p.lang && p.lang !== firstLang);
 const secondLang = _secondLangItem ? _secondLangItem.lang : null;
 
+function isSecondLanguageIndex(idx) {
+  return !!(secondLang && paragraphData[idx] && paragraphData[idx].lang === secondLang);
+}
+
+function findNextSecondLanguageIndex(startIdx) {
+  if (!secondLang) return startIdx;
+  for (let i = Math.max(0, startIdx); i < paragraphData.length; i++) {
+    if (paragraphData[i] && paragraphData[i].lang === secondLang) return i;
+  }
+  return -1;
+}
+
 const bookSelect = document.getElementById('bookSelect');
 const docSelect = document.getElementById('docSelect');
 const voiceSelectEn = document.getElementById('voiceSelectEn');
@@ -53,6 +65,8 @@ const rateEn = document.getElementById('rateEn');
 const rateFr = document.getElementById('rateFr');
 const pitchInput = document.getElementById('pitch');
 const fontSizeInput = document.getElementById('fontSize');
+const dailyGoalInput = document.getElementById('dailyGoal');
+const dailyGoalStatus = document.getElementById('dailyGoalStatus');
 const showLangSelect = document.getElementById('showLang');
 const settingsToggleBtn = document.getElementById('settingsToggle');
 const settingsPanel = document.getElementById('settingsPanel');
@@ -169,7 +183,97 @@ const LS = {
   rateFr: 'tts.rateFr',
   fontSize: 'tts.fontSize',
   showLang: 'tts.showLang',
+  dailyGoal: 'tts.dailyChapterGoal',
+  dailyCounts: 'tts.dailyChapterCounts',
 };
+const SESSION_DAILY_GOAL_FLASH = 'tts.dailyGoalFlashMessage';
+
+function getTodayKey() {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function loadDailyCounts() {
+  if (!localStorageAvailable) return {};
+  try {
+    const raw = localStorage.getItem(LS.dailyCounts);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    console.warn('[TTS] localStorage read error (dailyCounts):', e);
+    return {};
+  }
+}
+
+function saveDailyCounts(counts) {
+  if (!localStorageAvailable) return;
+  try {
+    localStorage.setItem(LS.dailyCounts, JSON.stringify(counts));
+  } catch (e) {
+    console.warn('[TTS] localStorage write error (dailyCounts):', e);
+  }
+}
+
+function getDailyGoal() {
+  const n = Number(dailyGoalInput?.value || 0);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.floor(n);
+}
+
+function renderDailyGoalStatus(overrideMessage) {
+  if (!dailyGoalStatus) return;
+  if (overrideMessage) {
+    dailyGoalStatus.textContent = overrideMessage;
+    return;
+  }
+
+  const counts = loadDailyCounts();
+  const today = getTodayKey();
+  const readToday = Number(counts[today] || 0);
+  const goal = getDailyGoal();
+
+  if (goal <= 0) {
+    dailyGoalStatus.textContent = `Today: ${readToday} chapter${readToday === 1 ? '' : 's'} read. Set a goal to track remaining.`;
+    return;
+  }
+
+  const remaining = Math.max(goal - readToday, 0);
+  if (remaining === 0) {
+    const extra = readToday - goal;
+    dailyGoalStatus.textContent =
+      extra > 0
+        ? `Goal reached: ${readToday}/${goal} chapters today (${extra} over goal).`
+        : `Goal reached: ${readToday}/${goal} chapters today.`;
+  } else {
+    dailyGoalStatus.textContent = `Today: ${readToday}/${goal} chapters. ${remaining} left to read.`;
+  }
+}
+
+function incrementDailyChapterCountForToday() {
+  const counts = loadDailyCounts();
+  const today = getTodayKey();
+  const readToday = Number(counts[today] || 0) + 1;
+  counts[today] = readToday;
+  saveDailyCounts(counts);
+
+  const goal = getDailyGoal();
+  if (goal <= 0) {
+    return `Recorded chapter ${readToday} for today. Set Daily Chapter Goal to track remaining.`;
+  }
+
+  const remaining = Math.max(goal - readToday, 0);
+  if (remaining === 0) {
+    const extra = readToday - goal;
+    return extra > 0
+      ? `Daily goal reached. Today: ${readToday}/${goal} chapters (${extra} over goal).`
+      : `Daily goal reached. Today: ${readToday}/${goal} chapters.`;
+  }
+  return `Chapter recorded. ${remaining} chapter${remaining === 1 ? '' : 's'} left today (${readToday}/${goal}).`;
+}
 
 function saveProgressToServer(paragraphIndex) {
   console.log('[TTS] Saving progress to server:', { book: currentBook, doc: currentDoc, paragraphIndex });
@@ -213,25 +317,48 @@ function loadBooks() {
   }
 }
 
+function getCommonPrefix(values) {
+  if (!Array.isArray(values) || values.length === 0) return '';
+  let prefix = String(values[0] || '');
+  for (let i = 1; i < values.length && prefix; i++) {
+    const current = String(values[i] || '');
+    let j = 0;
+    const max = Math.min(prefix.length, current.length);
+    while (j < max && prefix[j] === current[j]) j++;
+    prefix = prefix.slice(0, j);
+  }
+  return prefix;
+}
+
+function compactLabelFromEnd(label, commonPrefix, maxLen = 30) {
+  const full = String(label || '');
+  const withoutPrefix = commonPrefix && full.startsWith(commonPrefix) ? full.slice(commonPrefix.length) : full;
+  const cleaned = withoutPrefix.trim() || full.trim();
+  if (cleaned.length <= maxLen) return cleaned;
+  // Keep the unique tail when labels share long beginnings.
+  return '…' + cleaned.slice(-(maxLen - 1));
+}
+
 function loadDocs() {
   console.log('[TTS] loadDocs called');
   docSelect.innerHTML = '';
+  const isFlashback = currentBook && currentBook.toLowerCase().includes('flashback');
+  const rawLabels = docs.map((d, idx) => {
+    if (isFlashback) {
+      const filename = String(d).split('/').pop().split('\\').pop();
+      const match = filename.match(/chapter(\d+)/i);
+      return match ? `Chapter ${parseInt(match[1], 10)}` : filename;
+    }
+    return Array.isArray(docLabels) && docLabels[idx] ? String(docLabels[idx]) : String(d);
+  });
+  const sharedPrefix = getCommonPrefix(rawLabels).replace(/[\s\-_.:;,/\\]+$/, '');
+
   docs.forEach((d, idx) => {
     const opt = document.createElement('option');
     opt.value = d;
-    // For Flashback book, use filename instead of title since all titles are the same
-    const isFlashback = currentBook && currentBook.toLowerCase().includes('flashback');
-    let label;
-    if (isFlashback) {
-      // Strip directory path and parse filename like "OEBPS/chapter001.html" -> "Chapter 1"
-      const filename = String(d).split('/').pop().split('\\').pop();
-      const match = filename.match(/chapter(\d+)/i);
-      label = match ? `Chapter ${parseInt(match[1], 10)}` : filename;
-    } else {
-      label = Array.isArray(docLabels) && docLabels[idx] ? String(docLabels[idx]) : String(d);
-    }
-    if (label.length > 30) label = label.slice(0, 27) + '…';
-    opt.textContent = label;
+    const fullLabel = rawLabels[idx] || String(d);
+    opt.textContent = compactLabelFromEnd(fullLabel, sharedPrefix, 30);
+    opt.title = fullLabel;
     docSelect.appendChild(opt);
   });
   // Use server-provided currentDoc (from progress system)
@@ -309,6 +436,40 @@ try {
   console.warn('[TTS] localStorage access error (font):', e);
 }
 
+// Restore daily chapter goal and status
+try {
+  const storedDailyGoal = localStorageAvailable ? localStorage.getItem(LS.dailyGoal) : null;
+  const initialGoal = Math.max(0, Math.floor(Number(storedDailyGoal || 0)));
+  if (dailyGoalInput) dailyGoalInput.value = String(initialGoal);
+} catch (e) {
+  console.warn('[TTS] localStorage access error (dailyGoal):', e);
+}
+
+try {
+  const flashMessage = sessionStorage.getItem(SESSION_DAILY_GOAL_FLASH);
+  if (flashMessage) {
+    renderDailyGoalStatus(flashMessage);
+    sessionStorage.removeItem(SESSION_DAILY_GOAL_FLASH);
+  } else {
+    renderDailyGoalStatus();
+  }
+} catch (_) {
+  renderDailyGoalStatus();
+}
+
+if (dailyGoalInput) {
+  dailyGoalInput.addEventListener('input', () => {
+    const goal = getDailyGoal();
+    dailyGoalInput.value = String(goal);
+    try {
+      if (localStorageAvailable) localStorage.setItem(LS.dailyGoal, String(goal));
+    } catch (e) {
+      console.warn('[TTS] localStorage set error (dailyGoal):', e);
+    }
+    renderDailyGoalStatus();
+  });
+}
+
 // On book change, navigate to first chapter
 bookSelect.addEventListener('change', () => {
   const b = bookSelect.value;
@@ -335,16 +496,26 @@ function updateNextChapterButton() {
     const nextIdx = idx + 1;
     const nextDoc = docs[nextIdx];
     const isFlashback = currentBook && currentBook.toLowerCase().includes('flashback');
-    let label;
+    let fullLabel;
     if (isFlashback) {
       const filename = String(nextDoc).split('/').pop().split('\\').pop();
       const match = filename.match(/chapter(\d+)/i);
-      label = match ? `Chapter ${parseInt(match[1], 10)}` : filename;
+      fullLabel = match ? `Chapter ${parseInt(match[1], 10)}` : filename;
     } else {
-      label = Array.isArray(docLabels) && docLabels[nextIdx] ? String(docLabels[nextIdx]) : String(nextDoc);
+      fullLabel = Array.isArray(docLabels) && docLabels[nextIdx] ? String(docLabels[nextIdx]) : String(nextDoc);
     }
-    if (label.length > 30) label = label.slice(0, 27) + '…';
-    nextChapterBtn.textContent = `Next Chapter: ${label} →`;
+    const nextRawLabels = docs.map((d, i) => {
+      if (isFlashback) {
+        const filename = String(d).split('/').pop().split('\\').pop();
+        const match = filename.match(/chapter(\d+)/i);
+        return match ? `Chapter ${parseInt(match[1], 10)}` : filename;
+      }
+      return Array.isArray(docLabels) && docLabels[i] ? String(docLabels[i]) : String(d);
+    });
+    const sharedPrefix = getCommonPrefix(nextRawLabels).replace(/[\s\-_.:;,/\\]+$/, '');
+    const shortLabel = compactLabelFromEnd(fullLabel, sharedPrefix, 30);
+    nextChapterBtn.textContent = `Next Chapter: ${shortLabel} →`;
+    nextChapterBtn.title = fullLabel;
   }
 }
 docSelect.addEventListener('change', updateNextChapterButton);
@@ -354,6 +525,38 @@ nextChapterBtn.addEventListener('click', () => {
   const idx = docSelect.selectedIndex >= 0 ? docSelect.selectedIndex : docs.indexOf(docSelect.value || currentDoc);
   if (idx < 0 || idx >= docs.length - 1) return;
   const nextDoc = docs[idx + 1];
+  const dailyMessage = incrementDailyChapterCountForToday();
+  renderDailyGoalStatus(dailyMessage);
+  try {
+    sessionStorage.setItem(SESSION_DAILY_GOAL_FLASH, dailyMessage);
+  } catch (_) {}
+  try {
+    alert(dailyMessage);
+  } catch (_) {}
+  try {
+    const payload = JSON.stringify({
+      book: bookSelect.value || currentBook,
+      doc: nextDoc,
+      paragraphIndex: 0,
+    });
+
+    // Persist chapter jump before navigation.
+    if (navigator.sendBeacon) {
+      const blob = new Blob([payload], { type: 'application/json' });
+      navigator.sendBeacon('/save-progress', blob);
+    } else {
+      fetch('/save-progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(err => {
+        console.warn('[TTS] Failed to save next chapter progress:', err);
+      });
+    }
+  } catch (err) {
+    console.warn('[TTS] Error preparing next chapter progress save:', err);
+  }
   const url = new URL(window.location.href);
   url.searchParams.set('book', bookSelect.value || currentBook);
   url.searchParams.set('doc', nextDoc);
@@ -475,6 +678,10 @@ function markPlaying(idx) {
         // First-language paragraph: keep the last second-language paragraph bolded
         paras[lastSecondLangIdx].classList.add('paired');
       }
+      // In bilingual mode, follow only the second-language lines while reading.
+      const shouldFollowForScroll = !secondLang || isSecondLanguageIndex(idx);
+      if (!shouldFollowForScroll) return;
+
       // Scroll to this paragraph if visible, else nearest visible one above
       let scrollToIdx = idx;
       while (scrollToIdx >= 0 && paras[scrollToIdx] && paras[scrollToIdx].classList.contains('hidden')) scrollToIdx--;
@@ -531,8 +738,15 @@ function speakNext() {
   };
   u.onend = () => {
     if (DEBUG_TTS) console.log(`[TTS] onend idx=${item.idx}`);
-    // Save progress after each paragraph
-    saveProgressToServer(item.idx + 1); // Save the next paragraph index
+    // In bilingual mode, checkpoint only at second-language lines.
+    if (!secondLang || item.lang === secondLang) {
+      let nextParagraphIndex = item.idx + 1;
+      if (secondLang) {
+        const nextSecondLangIndex = findNextSecondLanguageIndex(item.idx + 1);
+        nextParagraphIndex = nextSecondLangIndex >= 0 ? nextSecondLangIndex : queue.length;
+      }
+      saveProgressToServer(nextParagraphIndex);
+    }
     if (currentIndex + 1 >= queue.length) {
       // Finished last paragraph; clear playing state and stop
       isActivePlaying = false;
@@ -752,6 +966,12 @@ window.addEventListener('load', () => {
       }
 
       console.log('[TTS] Positioning to paragraph:', targetIndex);
+      if (secondLang) {
+        const nextSecondLangIndex = findNextSecondLanguageIndex(targetIndex);
+        if (nextSecondLangIndex >= 0) {
+          targetIndex = nextSecondLangIndex;
+        }
+      }
       // If the target paragraph is hidden, advance to the next visible one
       while (
         targetIndex >= 0 &&

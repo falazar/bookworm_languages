@@ -43,6 +43,12 @@
         Font Size
         <input id="fontSize" type="range" min="15" max="26" step="1" value="17" />
       </label>
+      <label>
+        Daily Chapter Goal
+        <input id="dailyGoal" type="number" min="0" step="1" value="0" />
+      </label>
+      <div class="break"></div>
+      <div id="dailyGoalStatus" class="daily-goal-status" aria-live="polite"></div>
       <div class="break"></div>
       <label>
         English Voice
@@ -88,10 +94,6 @@
   <div style="margin-top: 16px;">
     <button id="nextChapter" class="btn">Next Chapter →</button>
   </div>
-
-  <footer>
-    Tip: Open this page in Chrome/Edge to access high-quality voices. Use the voice list to pick a "Google" voice if available.
-  </footer>
 
   <script>
     // Server-provided data

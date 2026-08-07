@@ -104,6 +104,9 @@ let lastTouchTs = 0;
 let isActivePlaying = false;
 // Track last playing position in case of external interruption
 let lastPlayingIndex = -1;
+let currentAudio = null;
+// Suppress scroll when user clicked to a specific paragraph
+let suppressNextScroll = false;
 
 // Keep screen awake while reading using the Screen Wake Lock API
 let wakeLock = null;
@@ -643,11 +646,19 @@ showLangSelect.addEventListener('change', () => {
 
 function speakParagraphs(startIdx = 0) {
   // Always queue all paragraphs — display visibility doesn't affect TTS
-  let items = paragraphData.map((item, idx) => ({
-    text: String(item.text || ''),
-    lang: String(item.lang || 'en'),
-    idx,
-  }));
+  // Paragraphs with audioCue expand into sub-items sharing the same idx so display stays intact
+  const items = [];
+  paragraphData.forEach((item, idx) => {
+    if (item.audioCue) {
+      const { before, dialog, audioFile, after } = item.audioCue;
+      const lang = String(item.lang || 'en');
+      if (before) items.push({ text: before, lang, audioFile: null, idx });
+      items.push({ text: dialog || '', lang, audioFile, idx });
+      if (after) items.push({ text: after, lang, audioFile: null, idx });
+    } else {
+      items.push({ text: String(item.text || ''), lang: String(item.lang || 'en'), audioFile: null, idx });
+    }
+  });
   queue = items;
   // Map DOM index to position in filtered queue
   let startPos = queue.findIndex(it => it.idx === startIdx);
@@ -683,6 +694,10 @@ function markPlaying(idx) {
       if (!shouldFollowForScroll) return;
 
       // Scroll to this paragraph if visible, else nearest visible one above
+      if (suppressNextScroll) {
+        suppressNextScroll = false;
+        return;
+      }
       let scrollToIdx = idx;
       while (scrollToIdx >= 0 && paras[scrollToIdx] && paras[scrollToIdx].classList.contains('hidden')) scrollToIdx--;
       if (scrollToIdx >= 0) {
@@ -720,6 +735,52 @@ function speakNext() {
     console.log(
       `[TTS] speakNext currentIndex=${currentIndex}/${queue.length} lang=${item.lang} idx=${item.idx} textLen=${item.text?.length || 0}`
     );
+
+  if (item.audioFile) {
+    markPlaying(item.idx);
+    userPaused = false;
+    speakNextCallDepth = 0;
+    const _src = `/audio/${encodeURIComponent(currentBook.replace(/\.epub$/i, ''))}/${item.audioFile}`;
+    currentAudio = new Audio(_src);
+    const _advance = () => {
+      currentAudio = null;
+      if (!secondLang || item.lang === secondLang) {
+        let _next = item.idx + 1;
+        if (secondLang) {
+          const _nsl = findNextSecondLanguageIndex(item.idx + 1);
+          _next = _nsl >= 0 ? _nsl : queue.length;
+        }
+        saveProgressToServer(_next);
+      }
+      if (currentIndex + 1 >= queue.length) {
+        isActivePlaying = false;
+        lastSecondLangIdx = -1;
+        paras.forEach(el => {
+          el.classList.remove('playing');
+          el.classList.remove('paired');
+        });
+        currentIndex = 1000;
+        releaseWakeLock();
+        return;
+      }
+      currentIndex++;
+      speakNext();
+    };
+    currentAudio.addEventListener('ended', _advance);
+    currentAudio.addEventListener('error', () => {
+      currentAudio = null;
+      console.warn('[TTS] audio error, skipping:', _src);
+      currentIndex++;
+      speakNext();
+    });
+    currentAudio.play().catch(() => {
+      currentAudio = null;
+      currentIndex++;
+      speakNext();
+    });
+    return;
+  }
+
   const u = new SpeechSynthesisUtterance(item.text);
   // Pick voice by language
   const vIdx = item.lang === 'fr' ? Number(voiceSelectFr.value) : Number(voiceSelectEn.value);
@@ -799,18 +860,27 @@ btnPlay.addEventListener('click', () => {
 btnPause.addEventListener('click', () => {
   if (DEBUG_TTS) console.log('[TTS] button pause');
   userPaused = true;
+  if (currentAudio) currentAudio.pause();
   window.speechSynthesis.pause();
 });
 btnResume.addEventListener('click', () => {
   if (DEBUG_TTS) console.log('[TTS] button resume');
   requestWakeLock().catch(() => {});
   userPaused = false;
-  window.speechSynthesis.resume();
+  if (currentAudio) {
+    currentAudio.play().catch(() => {});
+  } else {
+    window.speechSynthesis.resume();
+  }
 });
 btnStop.addEventListener('click', () => {
   removePeek();
   isActivePlaying = false;
   lastSecondLangIdx = -1;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio = null;
+  }
   window.speechSynthesis.cancel();
   currentIndex = -1;
   paras.forEach(el => {
@@ -862,6 +932,7 @@ function showPeek(clickedIdx) {
   peekEl = document.createElement('div');
   peekEl.className = 'para para-peek';
   peekEl.setAttribute('data-lang', pairData.lang);
+  peekEl.setAttribute('data-index', pairIdx);
   peekEl.innerHTML = '<button class="peek-close" title="Close">&times;</button>' + '<span>' + pairData.text + '</span>';
   peekEl.querySelector('.peek-close').addEventListener('click', e => {
     e.stopPropagation();
@@ -879,6 +950,40 @@ contentEl.addEventListener('click', ev => {
   const target = ev.target;
   // Exclude clicks on peek elements (close button handled separately)
   const para = target && target.closest ? target.closest('.para:not(.para-peek)') : null;
+  // Allow clicking the peek element itself to start reading from that paired paragraph
+  const peekPara = target && target.closest ? target.closest('.para-peek') : null;
+  if (peekPara && !target.closest('.peek-close')) {
+    const peekIdx = Number(peekPara.getAttribute('data-index'));
+    if (!isNaN(peekIdx) && peekIdx >= 0) {
+      if (peekIdx === currentPlayingIdx) {
+        if (currentAudio) {
+          if (currentAudio.paused) {
+            userPaused = false;
+            currentAudio.play().catch(() => {});
+          } else {
+            userPaused = true;
+            currentAudio.pause();
+          }
+        } else {
+          const s = window.speechSynthesis;
+          if (s.paused || userPaused) {
+            userPaused = false;
+            resumeOrRestart(peekIdx);
+          } else if (s.speaking) {
+            userPaused = true;
+            s.pause();
+          }
+        }
+      } else {
+        isActivePlaying = false;
+        window.speechSynthesis.cancel();
+        requestWakeLock().catch(() => {});
+        suppressNextScroll = true;
+        speakParagraphs(peekIdx);
+      }
+    }
+    return;
+  }
   if (!para) return;
   const idx = Number(para.getAttribute('data-index'));
   if (DEBUG_TTS) console.log(`[TTS] click paragraph idx=${idx} currentPlayingIdx=${currentPlayingIdx}`);
@@ -886,6 +991,16 @@ contentEl.addEventListener('click', ev => {
   showPeek(idx);
   // If clicking the currently playing paragraph, toggle pause/resume
   if (idx === currentPlayingIdx) {
+    if (currentAudio) {
+      if (currentAudio.paused) {
+        userPaused = false;
+        currentAudio.play().catch(() => {});
+      } else {
+        userPaused = true;
+        currentAudio.pause();
+      }
+      return;
+    }
     const s = window.speechSynthesis;
     const shouldResume = s.paused || userPaused;
     if (shouldResume) {
@@ -901,6 +1016,7 @@ contentEl.addEventListener('click', ev => {
       isActivePlaying = false; // Clear flag before cancel
       s.cancel();
       requestWakeLock().catch(() => {});
+      suppressNextScroll = true;
       speakParagraphs(idx);
     }
     return;
@@ -910,6 +1026,7 @@ contentEl.addEventListener('click', ev => {
   isActivePlaying = false; // Clear flag before cancel
   window.speechSynthesis.cancel();
   requestWakeLock().catch(() => {});
+  suppressNextScroll = true;
   speakParagraphs(idx);
 });
 
@@ -929,6 +1046,17 @@ window.addEventListener('keydown', e => {
   e.preventDefault();
   const s = window.speechSynthesis;
   // Resume if paused (or flagged paused), otherwise pause if speaking
+  if (currentAudio) {
+    if (currentAudio.paused || userPaused) {
+      userPaused = false;
+      requestWakeLock().catch(() => {});
+      currentAudio.play().catch(() => {});
+    } else {
+      userPaused = true;
+      currentAudio.pause();
+    }
+    return;
+  }
   if (s.paused || userPaused) {
     if (DEBUG_TTS) console.log(`[TTS] action: resume (space) paused=${s.paused} userPaused=${userPaused}`);
     userPaused = false;

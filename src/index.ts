@@ -569,7 +569,14 @@ function getPreferredFallbackDoc(docs: string[]): string | undefined {
  * @param selectedDoc - Document path within the EPUB
  * @returns Array of paragraph objects with text and language
  */
-function extractParagraphsFromDoc(epubPath: string, selectedDoc: string): Array<{ text: string; lang: string }> {
+function extractParagraphsFromDoc(
+  epubPath: string,
+  selectedDoc: string
+): Array<{
+  text: string;
+  lang: string;
+  audioCue?: { before: string; dialog: string; audioFile: string; after: string };
+}> {
   const zip = new AdmZip(epubPath);
   const entries = zip.getEntries();
 
@@ -583,18 +590,57 @@ function extractParagraphsFromDoc(epubPath: string, selectedDoc: string): Array<
   const rawHtml = docEntry.getData().toString('utf8');
   const $ = cheerio.load(rawHtml, { xmlMode: true });
 
-  const paragraphs = $('p')
-    .map((_, el) => {
-      const text = $(el).text().trim();
-      if (!text) return null;
-      const isTranslated = $(el).hasClass('translated');
-      const lang = isTranslated ? 'fr' : 'en';
-      return { text, lang };
-    })
-    .get()
-    .filter((p: { text: string; lang: string } | null) => p !== null);
+  const segments: Array<{
+    text: string;
+    lang: string;
+    audioCue?: { before: string; dialog: string; audioFile: string; after: string };
+  }> = [];
 
-  return paragraphs as Array<{ text: string; lang: string }>;
+  $('p').each((_, el) => {
+    const isTranslated = $(el).hasClass('translated');
+    const lang = isTranslated ? 'fr' : 'en';
+
+    // Fast path: no audio spans
+    if (!$(el).find('span[data-audio]').length) {
+      const text = $(el).text().trim();
+      if (text) segments.push({ text, lang });
+      return;
+    }
+
+    // Has audio span: one display paragraph, audioCue carries the playback split
+    const fullText = $(el).text().trim();
+    if (!fullText) return;
+
+    let before = '';
+    let audioFile = '';
+    let dialog = '';
+    let after = '';
+    let inAfter = false;
+
+    $(el)
+      .contents()
+      .each((_, node) => {
+        const $node = $(node as any);
+        const af = typeof $node.attr === 'function' ? $node.attr('data-audio') : undefined;
+        if (af && !inAfter) {
+          audioFile = af;
+          dialog = $node.text ? $node.text().trim() : '';
+          inAfter = true;
+        } else if (inAfter) {
+          after += (node as any).type === 'text' ? (node as any).data || '' : $node.text ? $node.text() : '';
+        } else {
+          before += (node as any).type === 'text' ? (node as any).data || '' : $node.text ? $node.text() : '';
+        }
+      });
+
+    segments.push({
+      text: fullText,
+      lang,
+      audioCue: { before: before.trim(), dialog, audioFile, after: after.trim() },
+    });
+  });
+
+  return segments;
 }
 
 // Progress routes

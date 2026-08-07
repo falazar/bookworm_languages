@@ -87,7 +87,11 @@
   <section id="content">
     <% paragraphs.forEach(function(p, idx) { %>
     <div class="para" data-index="<%= idx %>" data-lang="<%= p.lang %>">
+      <% if (p.audioCue) { %>
+      <span><%- p.audioCue.before ? p.audioCue.before + ' ' : '' %><span data-audio="<%= p.audioCue.audioFile %>"><%= p.audioCue.dialog %></span><%= p.audioCue.after ? ' ' + p.audioCue.after : '' %></span>
+      <% } else { %>
       <span><%= p.text %></span>
+      <% } %>
     </div>
     <% }) %>
   </section>
